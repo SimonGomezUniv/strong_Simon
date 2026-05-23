@@ -2,12 +2,19 @@ import type { RoutineTemplate, TemplateExercise, TemplateSet } from '../types'
 
 const SEED_TIMESTAMP = '2026-05-23T00:00:00.000Z'
 
-function makeSet(setNumber: number, targetReps: number, targetWeight: number, restSeconds: number): TemplateSet {
+function makeSet(
+  setNumber: number,
+  targetReps: number,
+  targetWeight: number,
+  restSeconds: number,
+  phaseTag: TemplateSet['phaseTag'] = 'working',
+): TemplateSet {
   return {
     setNumber,
     targetReps,
     targetWeight,
     restSeconds,
+    phaseTag,
   }
 }
 
@@ -33,11 +40,11 @@ export const DEFAULT_TEMPLATES: RoutineTemplate[] = [
     updatedAt: SEED_TIMESTAMP,
     exercises: [
       makeExercise('tpl-a-ex-1', 'chest-press', 0, [
-        makeSet(1, 10, 36, 120),
-        makeSet(2, 8, 41, 120),
-        makeSet(3, 8, 54, 120),
-        makeSet(4, 8, 54, 120),
-        makeSet(5, 8, 54, 120),
+        makeSet(1, 10, 36, 120, 'warmup'),
+        makeSet(2, 8, 41, 120, 'warmup'),
+        makeSet(3, 8, 54, 120, 'working'),
+        makeSet(4, 8, 54, 120, 'working'),
+        makeSet(5, 8, 54, 120, 'working'),
       ]),
       makeExercise('tpl-a-ex-2', 'seated-row-cable', 1, [
         makeSet(1, 10, 50, 90),
@@ -65,8 +72,8 @@ export const DEFAULT_TEMPLATES: RoutineTemplate[] = [
         makeSet(3, 13, 8, 45),
       ]),
       makeExercise('tpl-a-ex-7', 'lat-pulldown', 6, [
-        makeSet(1, 12, 35, 90),
-        makeSet(2, 12, 35, 90),
+        makeSet(1, 12, 35, 90, 'finisher'),
+        makeSet(2, 12, 35, 90, 'finisher'),
       ]),
     ],
   },
@@ -77,9 +84,9 @@ export const DEFAULT_TEMPLATES: RoutineTemplate[] = [
     updatedAt: SEED_TIMESTAMP,
     exercises: [
       makeExercise('tpl-b-ex-1', 'lat-pulldown', 0, [
-        makeSet(1, 10, 43, 90),
-        makeSet(2, 10, 43, 90),
-        makeSet(3, 9, 43, 90),
+        makeSet(1, 10, 43, 90, 'warmup'),
+        makeSet(2, 10, 43, 90, 'working'),
+        makeSet(3, 9, 43, 90, 'working'),
       ]),
       makeExercise('tpl-b-ex-2', 'low-row-triangle', 1, [
         makeSet(1, 10, 45, 90),
@@ -112,9 +119,9 @@ export const DEFAULT_TEMPLATES: RoutineTemplate[] = [
         makeSet(3, 12, 72, 90),
       ]),
       makeExercise('tpl-b-ex-8', 'crunch-machine', 7, [
-        makeSet(1, 15, 0, 45),
-        makeSet(2, 15, 0, 45),
-        makeSet(3, 15, 0, 45),
+        makeSet(1, 15, 0, 45, 'finisher'),
+        makeSet(2, 15, 0, 45, 'finisher'),
+        makeSet(3, 15, 0, 45, 'finisher'),
       ]),
     ],
   },

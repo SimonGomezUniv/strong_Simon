@@ -11,12 +11,17 @@ export type TemplateSet = {
   targetReps: number
   targetWeight: number
   restSeconds: number
+  phaseTag?: TemplateExerciseTag
 }
+
+export type TemplateExerciseTag = 'warmup' | 'working' | 'finisher'
 
 export type TemplateExercise = {
   id: string
   exerciseId: string
   orderIndex: number
+  // Legacy field kept for migration of older local data.
+  tag?: TemplateExerciseTag
   sets: TemplateSet[]
 }
 
@@ -36,6 +41,8 @@ export type SessionSet = {
   actualReps: number
   actualWeight: number
   restSeconds: number
+  phaseTag?: TemplateExerciseTag
+  effortTag?: 'fail' | 'drop'
   completedAt?: string
 }
 
@@ -43,6 +50,8 @@ export type SessionExercise = {
   id: string
   exerciseId: string
   orderIndex: number
+  // Legacy field kept for migration of older local data.
+  tag?: TemplateExerciseTag
   sets: SessionSet[]
 }
 

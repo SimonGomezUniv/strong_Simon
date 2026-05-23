@@ -13,6 +13,19 @@ function cloneTemplates(templates: RoutineTemplate[]): RoutineTemplate[] {
   }))
 }
 
+function normalizeTemplates(templates: RoutineTemplate[]): RoutineTemplate[] {
+  return templates.map((template) => ({
+    ...template,
+    exercises: template.exercises.map((exercise) => ({
+      ...exercise,
+      sets: exercise.sets.map((set) => ({
+        ...set,
+        phaseTag: set.phaseTag ?? exercise.tag ?? 'working',
+      })),
+    })),
+  }))
+}
+
 export function loadTemplates(): RoutineTemplate[] {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) {
@@ -23,7 +36,13 @@ export function loadTemplates(): RoutineTemplate[] {
 
   try {
     const parsed = JSON.parse(raw) as RoutineTemplate[]
-    return Array.isArray(parsed) ? parsed : []
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    const normalized = normalizeTemplates(parsed)
+    saveTemplates(normalized)
+    return normalized
   } catch {
     return []
   }

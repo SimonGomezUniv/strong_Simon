@@ -4,5 +4,11 @@
   },
   "workbench.diffEditorAssociations": {
     "*.md": "vscode.markdown.preview.editor"
+  },
+  "chat.tools.terminal.autoApprove": {
+    "/^Set-Location \"C:\\\\Users\\\\mojit\\\\Desktop\\\\src\\\\strong_Simon\\\\strong-simon-app\"; cmd /c npm run build$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
   }
 }

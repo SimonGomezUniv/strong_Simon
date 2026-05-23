@@ -205,6 +205,99 @@
 - Critere d'acceptation:
   - aucun ecrasement silencieux de donnees
 
+## EPIC H - Ameliorations interface (P1)
+
+### H-01 Onglet Templates: liste d'abord + bouton ajout
+- Priorite: P1
+- Estimation: M
+- Dependances: D-01, D-02
+- Description: afficher d'abord les templates existants, puis ouvrir l'editeur via un bouton +.
+- Critere d'acceptation:
+  - la liste des templates est visible en premier dans l'onglet Templates
+  - un bouton + ouvre l'editeur existant en mode creation
+  - l'edition d'un template existant est accessible depuis la liste
+
+### H-02 Onglet Seances: demarrage depuis templates existants
+- Priorite: P1
+- Estimation: S
+- Dependances: D-03, E-01
+- Description: proposer l'ecran de lancement d'une seance a partir des templates quand aucune seance n'est active.
+- Critere d'acceptation:
+  - l'onglet Seances affiche les templates demarrables si aucune seance n'est active
+  - le bouton Demarrer lance la seance sur snapshot du template
+
+### H-03 Onglet Seance: image de l'exercice courant
+- Priorite: P1
+- Estimation: S
+- Dependances: C-01, E-01
+- Description: afficher l'image locale de l'exercice actif dans l'ecran de seance.
+- Critere d'acceptation:
+  - l'image de l'exercice courant est visible pendant la seance
+  - fallback visuel en cas d'image manquante
+  - rendu responsive mobile/desktop
+
+### H-04 Onglet Seance: barre sticky de navigation entre exercices
+- Priorite: P1
+- Estimation: M
+- Dependances: E-01
+- Description: ajouter une liste sticky en haut de l'onglet Seance pour basculer rapidement d'un exercice a l'autre.
+- Critere d'acceptation:
+  - la barre reste visible au scroll
+  - un clic sur un exercice change le focus de l'ecran
+  - l'exercice actif est clairement mis en evidence
+
+### H-05 Onglet Historique: ecran split gauche/droite
+- Priorite: P1
+- Estimation: S
+- Dependances: E-04
+- Description: separer l'ecran historique en deux zones: liste des seances a gauche, detail a droite.
+- Critere d'acceptation:
+  - en desktop, layout 2 colonnes stable (liste/detail)
+  - en mobile, layout adapte sans perte d'information
+  - la selection d'une seance met a jour le detail sans rechargement
+
+### H-06 Branding: logo plus serieux avec altere
+- Priorite: P1
+- Estimation: XS
+- Dependances: A-02
+- Description: remplacer le logo par une version plus sobre et professionnelle avec symbole d'altere.
+- Critere d'acceptation:
+  - nouveau logo visible dans le header
+  - bonne lisibilite sur mobile et desktop
+
+## EPIC I - Passe mobile templates et historique (P1)
+
+### I-01 Historique mobile: detail immediat au clic
+- Priorite: P1
+- Estimation: M
+- Dependances: E-04, H-05
+- Description: sur mobile, ouvrir le detail d'une seance en overlay/sheet au clic pour eviter d'aller scroller sous la liste.
+- Critere d'acceptation:
+  - un clic sur une seance affiche son detail sans scroll vertical supplementaire
+  - fermeture simple du detail mobile
+  - le layout desktop liste/detail reste conserve
+
+### I-02 Templates mobile: cartes et actions compactes
+- Priorite: P1
+- Estimation: M
+- Dependances: H-01, D-02
+- Description: reduire la taille des boutons et densifier les cartes templates et l'editeur sur mobile.
+- Critere d'acceptation:
+  - boutons de cartes plus compacts sur mobile
+  - actions principales clairement hierarchisees
+  - edition des sets plus lisible sans blocs trop hauts
+
+### I-03 Densite mobile globale et interactions
+- Priorite: P1
+- Estimation: S
+- Dependances: I-01, I-02
+- Description: harmoniser paddings, chips, actions et feedbacks des zones hors seance pour une meilleure vue d'ensemble mobile.
+- Critere d'acceptation:
+  - densite visuelle plus compacte en mobile
+  - pas de zone importante cachee hors ecran sans feedback clair
+  - interactions principales visibles en un coup d'oeil
+  - aucun decalage de layout
+
 ## Parcours de recette MVP
 - creer un template depuis catalogue
 - lancer une seance
@@ -218,5 +311,6 @@
 2. B-01, B-02, C-01
 3. D-01, D-02, C-02, C-03
 4. E-01, D-03, E-02, E-03, E-04
-5. F-01, F-02
-6. G-01, G-02, G-03
+5. H-01, H-02, H-03, H-04, H-05, H-06
+6. F-01, F-02
+7. G-01, G-02, G-03
