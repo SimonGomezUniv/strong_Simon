@@ -103,7 +103,7 @@
 
 .top-menu {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.65rem;
   position: sticky;
   top: 0.75rem;
@@ -126,6 +126,7 @@
   background: #ffffff;
   color: #123758;
   border: 1px solid #d8e5ef;
+  white-space: nowrap;
 }
 
 .top-menu__button.is-active {
@@ -979,6 +980,11 @@ button:disabled {
   background: linear-gradient(180deg, #f8fbff 0%, #f1f7fb 100%);
 }
 
+.stats-page {
+  display: grid;
+  gap: 1rem;
+}
+
 .stats-range-controls {
   display: flex;
   flex-wrap: wrap;
@@ -1042,7 +1048,7 @@ button:disabled {
 .stats-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 0.75rem;
+  gap: 0.9rem;
 }
 
 .stats-summary-card,
@@ -1050,7 +1056,7 @@ button:disabled {
   border: 1px solid #dce6ef;
   border-radius: 0.9rem;
   background: #ffffff;
-  padding: 0.9rem;
+  padding: 0.8rem;
 }
 
 .stats-summary-card {
@@ -1083,32 +1089,34 @@ button:disabled {
 
 .stats-line-chart svg {
   width: 100%;
-  height: 200px;
+  height: 176px;
   overflow: visible;
   border-radius: 0.9rem;
   background:
-    linear-gradient(180deg, rgba(11, 45, 77, 0.04) 0%, rgba(11, 45, 77, 0.01) 100%),
+    linear-gradient(180deg, rgba(11, 45, 77, 0.02) 0%, rgba(11, 45, 77, 0.006) 100%),
     repeating-linear-gradient(
       to top,
       transparent 0,
       transparent 46px,
-      rgba(141, 171, 196, 0.18) 46px,
-      rgba(141, 171, 196, 0.18) 47px
+      rgba(141, 171, 196, 0.1) 46px,
+      rgba(141, 171, 196, 0.1) 47px
     );
 }
 
 .stats-line-chart__path {
   fill: none;
-  stroke: #0d8b7d;
-  stroke-width: 2.4;
+  stroke: #0b7a6f;
+  stroke-width: 1.05;
   stroke-linecap: round;
   stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .stats-line-chart__dot {
-  fill: #0d8b7d;
+  fill: #0b7a6f;
   stroke: #ffffff;
-  stroke-width: 0.8;
+  stroke-width: 0.5;
+  vector-effect: non-scaling-stroke;
 }
 
 .stats-line-chart__legend {
@@ -1142,6 +1150,23 @@ button:disabled {
   border-radius: 0.8rem;
   padding: 0.7rem;
   background: #f8fbff;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.stats-usage-row:hover {
+  border-color: #c8d8e6;
+  background: #f3f8fd;
+}
+
+.stats-usage-row.is-active {
+  border-color: #0b7a6f;
+  background: #e8f7f4;
+  box-shadow: inset 0 0 0 1px rgba(11, 122, 111, 0.15);
 }
 
 .stats-usage-row__head,
@@ -1163,6 +1188,16 @@ button:disabled {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #0d8b7d 0%, #49b1a6 100%);
+}
+
+@media (min-width: 900px) {
+  .stats-line-chart__path {
+    stroke-width: 0.95;
+  }
+
+  .stats-line-chart svg {
+    height: 164px;
+  }
 }
 
 .google-merge-preview {
@@ -1860,9 +1895,9 @@ button:disabled {
 
   .top-menu__button {
     min-height: 48px;
-    gap: 0.35rem;
-    padding: 0.5rem 0.4rem;
-    font-size: 0.84rem;
+    gap: 0.25rem;
+    padding: 0.45rem 0.3rem;
+    font-size: 0.8rem;
   }
 
   .top-menu__button span {
@@ -2230,7 +2265,9 @@ button:disabled {
   }
 
   .top-menu__button {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
+    gap: 0.18rem;
+    padding: 0.4rem 0.2rem;
   }
 
   .status-icon-button,

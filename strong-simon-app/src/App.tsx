@@ -23,7 +23,7 @@ import type {
   SessionSet,
 } from './types'
 
-type ActiveView = 'templates' | 'session' | 'history'
+type ActiveView = 'templates' | 'session' | 'history' | 'stats'
 type TemplateSetField = 'targetReps' | 'targetWeight' | 'restSeconds'
 type SessionSetField = 'actualReps' | 'actualWeight'
 type HistoryRange = '7d' | '1m' | '1y' | 'all' | 'custom'
@@ -54,6 +54,7 @@ type StatsUsagePoint = {
 type StatsOverview = {
   hasCompletedSessions: boolean
   machineOptions: StatsMachineOption[]
+  activeMachineId: string
   selectedMachineLabel: string
   rangeLabel: string
   totalSessions: number
@@ -63,6 +64,7 @@ type StatsOverview = {
   filteredUsage: StatsUsagePoint[]
   weightPoints: StatsWeightPoint[]
 }
+type StatsWeightMode = 'max-per-session' | 'all-weights'
 const TEMPLATE_COLLAPSE_STORAGE_KEY = 'strong-simon-template-collapse-state'
 const APP_THEME_STORAGE_KEY = 'strong-simon-theme-v1'
 const APP_THEME_OPTIONS: Array<{ id: AppThemeId; label: string; description: string }> = [
@@ -961,6 +963,17 @@ function MenuIcon({ view }: { view: ActiveView }) {
     )
   }
 
+  if (view === 'stats') {
+    return (
+      <svg {...commonProps}>
+        <path d="M4 19h16" />
+        <path d="M7 15v-4" />
+        <path d="M12 15V8" />
+        <path d="M17 15v-6" />
+      </svg>
+    )
+  }
+
   return (
     <svg {...commonProps}>
       <circle cx="12" cy="12" r="8" />
@@ -1165,7 +1178,7 @@ function App() {
   const [isWatchStartPopupOpen, setIsWatchStartPopupOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [appTheme, setAppTheme] = useState<AppThemeId>(() => loadAppTheme())
-  const [isStatsOpen, setIsStatsOpen] = useState(false)
+  const [statsWeightMode, setStatsWeightMode] = useState<StatsWeightMode>('max-per-session')
   const [statsMachineFilter, setStatsMachineFilter] = useState('all')
   const [googleProfile, setGoogleProfile] = useState<GoogleIdentityProfile | null>(null)
   const [googleAccessToken, setGoogleAccessToken] = useState('')
@@ -1355,7 +1368,6 @@ function App() {
       .sort((left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime())
 
     const usageMap = new Map<string, StatsUsagePoint>()
-    const points: StatsWeightPoint[] = []
 
     completedSessions.forEach((session) => {
       const machinesSeenInSession = new Set<string>()
@@ -1397,15 +1409,6 @@ function App() {
         }
 
         usageMap.set(machineId, currentUsage)
-
-        points.push({
-          key: `${session.id}-${machineId}`,
-          label: formatStatDateLabel(session.startedAt),
-          machineId,
-          machineLabel,
-          weight: maxWeightForExerciseInSession,
-          date: session.startedAt,
-        })
       })
     })
 
@@ -1428,15 +1431,76 @@ function App() {
         : 'all'
     const filteredUsage =
       activeMachineId === 'all' ? usage : usage.filter((entry) => entry.machineId === activeMachineId)
-    const weightPoints = points.filter((point) => activeMachineId === 'all' || point.machineId === activeMachineId)
+    const selectedMachineLabel =
+      activeMachineId === 'all'
+        ? 'Toutes les machines'
+        : machineOptions.find((option) => option.id === activeMachineId)?.label ?? 'Machine inconnue'
+
+    const weightPoints = completedSessions.flatMap((session) => {
+      if (statsWeightMode === 'max-per-session') {
+        let sessionMaxWeight = 0
+
+        session.exercises.forEach((exercise) => {
+          if (activeMachineId !== 'all' && exercise.exerciseId !== activeMachineId) {
+            return
+          }
+
+          exercise.sets.forEach((set) => {
+            if (set.actualWeight > sessionMaxWeight) {
+              sessionMaxWeight = set.actualWeight
+            }
+          })
+        })
+
+        if (sessionMaxWeight <= 0) {
+          return [] as StatsWeightPoint[]
+        }
+
+        return [
+          {
+            key: `${session.id}-${activeMachineId}-max`,
+            label: formatStatDateLabel(session.startedAt),
+            machineId: activeMachineId,
+            machineLabel: selectedMachineLabel,
+            weight: sessionMaxWeight,
+            date: session.startedAt,
+          },
+        ] satisfies StatsWeightPoint[]
+      }
+
+      const points: StatsWeightPoint[] = []
+      session.exercises.forEach((exercise) => {
+        if (activeMachineId !== 'all' && exercise.exerciseId !== activeMachineId) {
+          return
+        }
+
+        const machineLabel =
+          EXERCISES.find((entry) => entry.id === exercise.exerciseId)?.name ?? 'Machine inconnue'
+
+        exercise.sets.forEach((set) => {
+          if (set.actualWeight <= 0) {
+            return
+          }
+
+          points.push({
+            key: `${session.id}-${exercise.id}-${set.id}`,
+            label: formatStatDateLabel(session.startedAt),
+            machineId: exercise.exerciseId,
+            machineLabel,
+            weight: set.actualWeight,
+            date: set.completedAt ?? session.startedAt,
+          })
+        })
+      })
+
+      return points
+    })
 
     return {
       hasCompletedSessions: completedSessions.length > 0,
       machineOptions,
-      selectedMachineLabel:
-        activeMachineId === 'all'
-          ? 'Toutes les machines'
-          : machineOptions.find((option) => option.id === activeMachineId)?.label ?? 'Machine inconnue',
+      activeMachineId,
+      selectedMachineLabel,
       rangeLabel: `${formatHistoryDateValue(formatDateInputValue(rangeStart))} au ${formatHistoryDateValue(
         formatDateInputValue(rangeEnd),
       )}`,
@@ -1450,7 +1514,7 @@ function App() {
       filteredUsage,
       weightPoints,
     }
-  }, [sessionHistory, statsMachineFilter, statsDateEnd, statsDateStart])
+  }, [sessionHistory, statsMachineFilter, statsDateEnd, statsDateStart, statsWeightMode])
 
   const currentExercise = activeSession?.exercises[currentExerciseIndex] ?? null
   const currentExerciseInfo = currentExercise
@@ -2655,7 +2719,7 @@ function App() {
                 type="button"
                 className="button-compact"
                 onClick={() => {
-                  setIsStatsOpen(true)
+                  setActiveView('stats')
                   setIsSettingsOpen(false)
                 }}
               >
@@ -2848,217 +2912,6 @@ function App() {
         </div>
       )}
 
-      {isStatsOpen && (
-        <div className="settings-overlay" role="dialog" aria-modal="true" onClick={() => setIsStatsOpen(false)}>
-          <section className="stats-panel" onClick={(event) => event.stopPropagation()}>
-            <div className="card-head section-head section-head--tight popup-head">
-              <div>
-                <h3>Statistiques</h3>
-                <p className="panel-intro">Analyse des seances terminees et des charges saisies.</p>
-              </div>
-              <button
-                className="popup-close-button"
-                type="button"
-                onClick={() => setIsStatsOpen(false)}
-                aria-label="Fermer"
-                title="Fermer"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <div className="stats-toolbar">
-              <div className="stats-range-controls" role="group" aria-label="Periode des statistiques">
-                <button
-                  type="button"
-                  className={statsRange === '7d' ? 'button-compact is-active' : 'button-compact'}
-                  onClick={() => applyStatsPreset('7d')}
-                >
-                  7j
-                </button>
-                <button
-                  type="button"
-                  className={statsRange === '1m' ? 'button-compact is-active' : 'button-compact'}
-                  onClick={() => applyStatsPreset('1m')}
-                >
-                  1m
-                </button>
-                <button
-                  type="button"
-                  className={statsRange === '1y' ? 'button-compact is-active' : 'button-compact'}
-                  onClick={() => applyStatsPreset('1y')}
-                >
-                  1a
-                </button>
-                <button
-                  type="button"
-                  className={statsRange === 'all' ? 'button-compact is-active' : 'button-compact'}
-                  onClick={() => applyStatsPreset('all')}
-                >
-                  tout
-                </button>
-              </div>
-
-              <label className="stats-filter-field">
-                <span>Machine</span>
-                <select
-                  value={statsMachineFilter}
-                  onChange={(event) => setStatsMachineFilter(event.target.value)}
-                >
-                  <option value="all">Toutes les machines</option>
-                  {statsOverview.machineOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="stats-date-controls">
-                <label className="history-date-field">
-                  <span>Du</span>
-                  <input
-                    type="date"
-                    value={statsDateStart}
-                    max={statsDateEnd || undefined}
-                    onChange={(event) => updateStatsDateBoundary('start', event.target.value)}
-                  />
-                </label>
-                <label className="history-date-field">
-                  <span>Au</span>
-                  <input
-                    type="date"
-                    value={statsDateEnd}
-                    min={statsDateStart || undefined}
-                    onChange={(event) => updateStatsDateBoundary('end', event.target.value)}
-                  />
-                </label>
-              </div>
-              <p className="stats-filter-hint">
-                Periode affichee: {statsOverview.rangeLabel}. Filtre applique a tous les graphes.
-              </p>
-            </div>
-
-            {!statsOverview.hasCompletedSessions && (
-              <div className="stats-empty-state">
-                <strong>Aucune statistique disponible</strong>
-                <p>Finalise au moins une seance avec des poids renseignes pour afficher les graphes.</p>
-              </div>
-            )}
-
-            {statsOverview.hasCompletedSessions && statsOverview.filteredUsage.length === 0 && (
-              <div className="stats-empty-state">
-                <strong>Aucun resultat pour ce filtre</strong>
-                <p>Essaie une autre machine pour retrouver des donnees exploitables.</p>
-              </div>
-            )}
-
-            {statsOverview.hasCompletedSessions && statsOverview.filteredUsage.length > 0 && (
-              <>
-                <div className="stats-summary-grid">
-                  <article className="stats-summary-card">
-                    <span className="stats-summary-card__label">Seances prises en compte</span>
-                    <strong>{statsOverview.totalSessions}</strong>
-                    <p>{statsOverview.selectedMachineLabel}</p>
-                  </article>
-                  <article className="stats-summary-card">
-                    <span className="stats-summary-card__label">Sets avec poids</span>
-                    <strong>{statsOverview.totalSets}</strong>
-                    <p>Historique filtre</p>
-                  </article>
-                  <article className="stats-summary-card">
-                    <span className="stats-summary-card__label">Charge max observee</span>
-                    <strong>{statsOverview.maxWeight > 0 ? formatWeightValue(statsOverview.maxWeight) : '0 kg'}</strong>
-                    <p>Meilleure performance enregistree</p>
-                  </article>
-                </div>
-
-                <article className="stats-chart-card">
-                  <div className="card-head section-head section-head--tight">
-                    <div>
-                      <h3>Evolution des poids</h3>
-                      <p className="panel-intro">
-                        Poids maximum releve par seance pour {statsOverview.selectedMachineLabel.toLowerCase()}.
-                      </p>
-                    </div>
-                    <span className="history-total-chip">{statsOverview.weightPoints.length} points</span>
-                  </div>
-
-                  {statsOverview.weightPoints.length === 0 ? (
-                    <p className="stats-chart-empty">Aucune charge enregistree pour cette selection.</p>
-                  ) : (
-                    <div className="stats-line-chart" aria-label="Graphique d'evolution des poids">
-                      <svg viewBox="0 0 100 48" preserveAspectRatio="none" role="img">
-                        <path
-                          className="stats-line-chart__path"
-                          d={buildLinePath(statsOverview.weightPoints, 100, 40)}
-                        />
-                        {statsOverview.weightPoints.map((point, index) => {
-                          const position = getLinePointPosition(statsOverview.weightPoints, index, 100, 40)
-
-                          return (
-                            <circle
-                              key={point.key}
-                              cx={position.x}
-                              cy={position.y}
-                              r="1.8"
-                              className="stats-line-chart__dot"
-                            >
-                              <title>{`${point.machineLabel} · ${point.label} · ${formatWeightValue(point.weight)}`}</title>
-                            </circle>
-                          )
-                        })}
-                      </svg>
-
-                      <div className="stats-line-chart__legend">
-                        {statsOverview.weightPoints.map((point) => (
-                          <div className="stats-line-chart__legend-item" key={`legend-${point.key}`}>
-                            <span>{point.label}</span>
-                            <strong>{formatWeightValue(point.weight)}</strong>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </article>
-
-                <article className="stats-chart-card">
-                  <div className="card-head section-head section-head--tight">
-                    <div>
-                      <h3>Machines les plus utilisees</h3>
-                      <p className="panel-intro">Classement sur les seances terminees avec poids reels saisis.</p>
-                    </div>
-                    <span className="history-total-chip">{statsOverview.usage.length} machines</span>
-                  </div>
-
-                  <div className="stats-usage-list" aria-label="Classement des machines utilisees">
-                    {statsOverview.filteredUsage.map((entry) => {
-                      const maxSessions = Math.max(1, ...statsOverview.filteredUsage.map((item) => item.sessions))
-                      const width = Math.max(10, Math.round((entry.sessions / maxSessions) * 100))
-
-                      return (
-                        <article className="stats-usage-row" key={entry.machineId}>
-                          <div className="stats-usage-row__head">
-                            <strong>{entry.label}</strong>
-                            <span>{entry.sessions} seances</span>
-                          </div>
-                          <div className="stats-usage-row__track">
-                            <div className="stats-usage-row__fill" style={{ width: `${width}%` }} />
-                          </div>
-                          <div className="stats-usage-row__meta">
-                            <span>{entry.sets} sets avec poids</span>
-                            <span>{formatWeightValue(entry.maxWeight)} max</span>
-                          </div>
-                        </article>
-                      )
-                    })}
-                  </div>
-                </article>
-              </>
-            )}
-          </section>
-        </div>
-      )}
-
       <nav className="top-menu" aria-label="Navigation principale">
         <button
           type="button"
@@ -3084,7 +2937,242 @@ function App() {
           <MenuIcon view="history" />
           <span>Historique</span>
         </button>
+        <button
+          type="button"
+          className={activeView === 'stats' ? 'top-menu__button is-active' : 'top-menu__button'}
+          onClick={() => setActiveView('stats')}
+        >
+          <MenuIcon view="stats" />
+          <span>Stats</span>
+        </button>
       </nav>
+
+      {activeView === 'stats' && (
+        <section className="panel stats-page">
+          <div className="card-head section-head section-head--tight">
+            <div>
+              <h2>Statistiques</h2>
+              <p className="panel-intro">Analyse des seances terminees et des charges saisies.</p>
+            </div>
+          </div>
+
+          <div className="stats-toolbar">
+            <div className="stats-range-controls" role="group" aria-label="Periode des statistiques">
+              <button
+                type="button"
+                className={statsRange === '7d' ? 'button-compact is-active' : 'button-compact'}
+                onClick={() => applyStatsPreset('7d')}
+              >
+                7j
+              </button>
+              <button
+                type="button"
+                className={statsRange === '1m' ? 'button-compact is-active' : 'button-compact'}
+                onClick={() => applyStatsPreset('1m')}
+              >
+                1m
+              </button>
+              <button
+                type="button"
+                className={statsRange === '1y' ? 'button-compact is-active' : 'button-compact'}
+                onClick={() => applyStatsPreset('1y')}
+              >
+                1a
+              </button>
+              <button
+                type="button"
+                className={statsRange === 'all' ? 'button-compact is-active' : 'button-compact'}
+                onClick={() => applyStatsPreset('all')}
+              >
+                tout
+              </button>
+            </div>
+
+            <label className="stats-filter-field">
+              <span>Machine</span>
+              <select value={statsMachineFilter} onChange={(event) => setStatsMachineFilter(event.target.value)}>
+                <option value="all">Toutes les machines</option>
+                {statsOverview.machineOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="stats-filter-field">
+              <span>Visualisation poids</span>
+              <select
+                value={statsWeightMode}
+                onChange={(event) => setStatsWeightMode(event.target.value as StatsWeightMode)}
+              >
+                <option value="max-per-session">Poids max par seance</option>
+                <option value="all-weights">Tous les poids</option>
+              </select>
+            </label>
+
+            <div className="stats-date-controls">
+              <label className="history-date-field">
+                <span>Du</span>
+                <input
+                  type="date"
+                  value={statsDateStart}
+                  max={statsDateEnd || undefined}
+                  onChange={(event) => updateStatsDateBoundary('start', event.target.value)}
+                />
+              </label>
+              <label className="history-date-field">
+                <span>Au</span>
+                <input
+                  type="date"
+                  value={statsDateEnd}
+                  min={statsDateStart || undefined}
+                  onChange={(event) => updateStatsDateBoundary('end', event.target.value)}
+                />
+              </label>
+            </div>
+            <p className="stats-filter-hint">
+              Periode affichee: {statsOverview.rangeLabel}. Filtre applique a tous les graphes.
+            </p>
+          </div>
+
+          {!statsOverview.hasCompletedSessions && (
+            <div className="stats-empty-state">
+              <strong>Aucune statistique disponible</strong>
+              <p>Finalise au moins une seance avec des poids renseignes pour afficher les graphes.</p>
+            </div>
+          )}
+
+          {statsOverview.hasCompletedSessions && statsOverview.filteredUsage.length === 0 && (
+            <div className="stats-empty-state">
+              <strong>Aucun resultat pour ce filtre</strong>
+              <p>Essaie une autre machine pour retrouver des donnees exploitables.</p>
+            </div>
+          )}
+
+          {statsOverview.hasCompletedSessions && statsOverview.filteredUsage.length > 0 && (
+            <>
+              <div className="stats-summary-grid">
+                <article className="stats-summary-card">
+                  <span className="stats-summary-card__label">Seances prises en compte</span>
+                  <strong>{statsOverview.totalSessions}</strong>
+                  <p>{statsOverview.selectedMachineLabel}</p>
+                </article>
+                <article className="stats-summary-card">
+                  <span className="stats-summary-card__label">Sets avec poids</span>
+                  <strong>{statsOverview.totalSets}</strong>
+                  <p>Historique filtre</p>
+                </article>
+                <article className="stats-summary-card">
+                  <span className="stats-summary-card__label">Charge max observee</span>
+                  <strong>{statsOverview.maxWeight > 0 ? formatWeightValue(statsOverview.maxWeight) : '0 kg'}</strong>
+                  <p>Meilleure performance enregistree</p>
+                </article>
+              </div>
+
+              <article className="stats-chart-card">
+                <div className="card-head section-head section-head--tight">
+                  <div>
+                    <h3>Machines les plus utilisees</h3>
+                    <p className="panel-intro">Clique sur une machine pour filtrer les graphes.</p>
+                  </div>
+                  <span className="history-total-chip">{statsOverview.usage.length} machines</span>
+                </div>
+
+                <div className="stats-usage-list" aria-label="Classement des machines utilisees">
+                  {statsOverview.usage.map((entry) => {
+                    const maxSessions = Math.max(1, ...statsOverview.usage.map((item) => item.sessions))
+                    const width = Math.max(10, Math.round((entry.sessions / maxSessions) * 100))
+                    const isActive = statsOverview.activeMachineId === entry.machineId
+
+                    return (
+                      <button
+                        type="button"
+                        className={isActive ? 'stats-usage-row is-active' : 'stats-usage-row'}
+                        key={entry.machineId}
+                        onClick={() => {
+                          setStatsMachineFilter((previous) =>
+                            previous === entry.machineId ? 'all' : entry.machineId,
+                          )
+                        }}
+                        aria-pressed={isActive}
+                        title={isActive ? 'Retirer le filtre machine' : `Filtrer sur ${entry.label}`}
+                      >
+                        <div className="stats-usage-row__head">
+                          <strong>{entry.label}</strong>
+                          <span>{entry.sessions} seances</span>
+                        </div>
+                        <div className="stats-usage-row__track">
+                          <div className="stats-usage-row__fill" style={{ width: `${width}%` }} />
+                        </div>
+                        <div className="stats-usage-row__meta">
+                          <span>{entry.sets} sets avec poids</span>
+                          <span>{formatWeightValue(entry.maxWeight)} max</span>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </article>
+
+              <article className="stats-chart-card">
+                <div className="card-head section-head section-head--tight">
+                  <div>
+                    <h3>
+                      {statsWeightMode === 'max-per-session'
+                        ? 'Evolution du poids max par seance'
+                        : 'Evolution de tous les poids'}
+                    </h3>
+                    <p className="panel-intro">
+                      {statsWeightMode === 'max-per-session'
+                        ? `Poids maximum releve par seance pour ${statsOverview.selectedMachineLabel.toLowerCase()}.`
+                        : `Toutes les charges enregistrees pour ${statsOverview.selectedMachineLabel.toLowerCase()}.`}
+                    </p>
+                  </div>
+                  <span className="history-total-chip">{statsOverview.weightPoints.length} points</span>
+                </div>
+
+                {statsOverview.weightPoints.length === 0 ? (
+                  <p className="stats-chart-empty">Aucune charge enregistree pour cette selection.</p>
+                ) : (
+                  <div className="stats-line-chart" aria-label="Graphique des poids">
+                    <svg viewBox="0 0 100 48" preserveAspectRatio="none" role="img">
+                      <path
+                        className="stats-line-chart__path"
+                        d={buildLinePath(statsOverview.weightPoints, 100, 40)}
+                      />
+                      {statsOverview.weightPoints.map((point, index) => {
+                        const position = getLinePointPosition(statsOverview.weightPoints, index, 100, 40)
+
+                        return (
+                          <circle
+                            key={point.key}
+                            cx={position.x}
+                            cy={position.y}
+                            r="0.42"
+                            className="stats-line-chart__dot"
+                          >
+                            <title>{`${point.machineLabel} · ${point.label} · ${formatWeightValue(point.weight)}`}</title>
+                          </circle>
+                        )
+                      })}
+                    </svg>
+
+                    <div className="stats-line-chart__legend">
+                      {statsOverview.weightPoints.map((point) => (
+                        <div className="stats-line-chart__legend-item" key={`legend-${point.key}`}>
+                          <span>{point.label}</span>
+                          <strong>{formatWeightValue(point.weight)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </article>
+            </>
+          )}
+        </section>
+      )}
 
       {activeView === 'session' && (
         <section className="panel workout-panel">
