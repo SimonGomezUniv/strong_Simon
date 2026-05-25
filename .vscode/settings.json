@@ -9,6 +9,16 @@
     "/^Set-Location \"C:\\\\Users\\\\mojit\\\\Desktop\\\\src\\\\strong_Simon\\\\strong-simon-app\"; cmd /c npm run build$/": {
       "approve": true,
       "matchCommandLine": true
+    },
+    "npm run build": true,
+    "npm.cmd": true,
+    "/^cmd /c npm run build$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "/^Set-Location \"c:/Users/mojit/Desktop/src/strong_Simon/strong-simon-app\"; cmd /c npm run build$/": {
+      "approve": true,
+      "matchCommandLine": true
     }
   }
 }

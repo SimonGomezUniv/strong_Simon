@@ -11,14 +11,14 @@ export const EXERCISES: Exercise[] = [
   {
     id: 'chest-press',
     name: 'Chest Press',
-    aliases: ['Presse poitrine', 'Developpe machine', 'Machine pecs'],
+    aliases: ['Presse poitrine', 'Developpe machine', 'Machine pecs', 'Chest Press (Machine)'],
     imageUrl: '/exercises/chest_press.jpg',
     category: 'Pectoraux',
   },
   {
     id: 'pec-deck',
     name: 'Pec Deck',
-    aliases: ['Butterfly machine', 'Pec fly machine', 'Ecartes machine'],
+    aliases: ['Butterfly machine', 'Pec fly machine', 'Ecartes machine', 'Pec Deck (Machine)'],
     imageUrl: '/exercises/pec_deck.jpg',
     category: 'Pectoraux',
   },
@@ -32,7 +32,13 @@ export const EXERCISES: Exercise[] = [
   {
     id: 'lat-pulldown',
     name: 'Lat Pulldown',
-    aliases: ['Tirage vertical', 'Poulie haute', 'Traction machine'],
+    aliases: [
+      'Tirage vertical',
+      'Poulie haute',
+      'Traction machine',
+      'Lat Pulldown (Cable)',
+      'Lat Pulldown (Machine)',
+    ],
     imageUrl: '/exercises/lat_pulldown.jpg',
     category: 'Dos',
   },
@@ -46,7 +52,13 @@ export const EXERCISES: Exercise[] = [
   {
     id: 'seated-overhead-press',
     name: 'Seated Overhead Press',
-    aliases: ['Shoulder Press', 'Presse epaules', 'Developpe militaire machine'],
+    aliases: [
+      'Shoulder Press',
+      'Presse epaules',
+      'Developpe militaire machine',
+      'Shoulder Press (Machine)',
+      'Seated Overhead Press (Barbell)',
+    ],
     imageUrl: '/exercises/seated_overhead_press.jpg',
     category: 'Epaules',
   },
@@ -67,7 +79,12 @@ export const EXERCISES: Exercise[] = [
   {
     id: 'cable-lateral-raise',
     name: 'Cable Lateral Raise',
-    aliases: ['Elevations laterales cable', 'Lateral raise poulie', 'Epaules poulie'],
+    aliases: [
+      'Elevations laterales cable',
+      'Lateral raise poulie',
+      'Epaules poulie',
+      'Lateral Raise (Cable)',
+    ],
     imageUrl: '/exercises/cable_lateral_raise.jpg',
     category: 'Epaules',
   },
@@ -81,14 +98,20 @@ export const EXERCISES: Exercise[] = [
   {
     id: 'cable-biceps-curl',
     name: 'Cable Biceps Curl',
-    aliases: ['Curl biceps poulie', 'Curl cable', 'Biceps cable'],
+    aliases: ['Curl biceps poulie', 'Curl cable', 'Biceps cable', 'Bicep Curl (Cable)'],
     imageUrl: '/exercises/cable_biceps_curl.jpg',
     category: 'Bras',
   },
   {
     id: 'triceps-pushdown',
     name: 'Triceps Pushdown',
-    aliases: ['Extension triceps poulie', 'Triceps cable', 'Pushdown triceps'],
+    aliases: [
+      'Extension triceps poulie',
+      'Triceps cable',
+      'Pushdown triceps',
+      'Triceps extension',
+      'Triceps Extension',
+    ],
     imageUrl: '/exercises/triceps_pushdown.jpg',
     category: 'Bras',
   },

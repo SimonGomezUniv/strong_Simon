@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { EXERCISES } from './data/exercises'
 import {
+  type GoogleDriveBackupPayload,
+  pullTemplatesAndSessionsFromGoogleDrive,
+  syncTemplatesAndSessionsToGoogleDrive,
+} from './google/googleDriveStorage'
+import { revokeGoogleAccess, signInWithGoogle, type GoogleIdentityProfile } from './google/googleIdentity'
+import {
   clearActiveSession,
   loadActiveSession,
   loadSessionHistory,
@@ -20,8 +26,94 @@ import type {
 type ActiveView = 'templates' | 'session' | 'history'
 type TemplateSetField = 'targetReps' | 'targetWeight' | 'restSeconds'
 type SessionSetField = 'actualReps' | 'actualWeight'
-type HistoryRange = '7d' | '1m' | '1y' | 'all'
+type HistoryRange = '7d' | '1m' | '1y' | 'all' | 'custom'
+type HistoryBucketRange = '7d' | '1m' | '1y' | 'all'
+type AppThemeId = 'classic' | 'sunset' | 'forest' | 'graphite' | 'ocean' | 'rose'
+type StatsMachineOption = {
+  id: string
+  label: string
+}
+
+type StatsWeightPoint = {
+  key: string
+  label: string
+  machineId: string
+  machineLabel: string
+  weight: number
+  date: string
+}
+
+type StatsUsagePoint = {
+  machineId: string
+  label: string
+  sessions: number
+  sets: number
+  maxWeight: number
+}
+
+type StatsOverview = {
+  hasCompletedSessions: boolean
+  machineOptions: StatsMachineOption[]
+  selectedMachineLabel: string
+  rangeLabel: string
+  totalSessions: number
+  totalSets: number
+  maxWeight: number
+  usage: StatsUsagePoint[]
+  filteredUsage: StatsUsagePoint[]
+  weightPoints: StatsWeightPoint[]
+}
 const TEMPLATE_COLLAPSE_STORAGE_KEY = 'strong-simon-template-collapse-state'
+const APP_THEME_STORAGE_KEY = 'strong-simon-theme-v1'
+const APP_THEME_OPTIONS: Array<{ id: AppThemeId; label: string; description: string }> = [
+  {
+    id: 'classic',
+    label: 'Classique Strong Simon',
+    description: 'Le theme actuel de l\'application.',
+  },
+  {
+    id: 'sunset',
+    label: 'Sunset Energy',
+    description: 'Ambiance chaude corail et sable pour une UI dynamique.',
+  },
+  {
+    id: 'forest',
+    label: 'Forest Iron',
+    description: 'Palette verte et cuivree, douce pour les longues seances.',
+  },
+  {
+    id: 'graphite',
+    label: 'Graphite Pro',
+    description: 'Style neutre pro, contraste net et lisibilite maximale.',
+  },
+  {
+    id: 'ocean',
+    label: 'Ocean Sprint',
+    description: 'Bleu lagon et cyan pour un rendu frais et moderne.',
+  },
+  {
+    id: 'rose',
+    label: 'Rose Punch',
+    description: 'Tons framboise et creme pour une identite plus expressive.',
+  },
+]
+
+function isAppThemeId(value: string): value is AppThemeId {
+  return APP_THEME_OPTIONS.some((option) => option.id === value)
+}
+
+function loadAppTheme(): AppThemeId {
+  if (typeof window === 'undefined') {
+    return 'classic'
+  }
+
+  const raw = window.localStorage.getItem(APP_THEME_STORAGE_KEY)
+  if (!raw) {
+    return 'classic'
+  }
+
+  return isAppThemeId(raw) ? raw : 'classic'
+}
 
 function createId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -106,6 +198,88 @@ function formatSessionDuration(startedAt: string, endedAt?: string) {
   return `${totalMinutes} min`
 }
 
+function formatStatDateLabel(value: string) {
+  const parsedDate = new Date(value)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return 'Date inconnue'
+  }
+
+  return parsedDate.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: 'short',
+  })
+}
+
+function formatWeightValue(value: number) {
+  return `${value.toLocaleString('fr-FR', {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 1,
+    maximumFractionDigits: 1,
+  })} kg`
+}
+
+function buildLinePath(points: StatsWeightPoint[], width: number, height: number) {
+  if (points.length === 0) {
+    return ''
+  }
+
+  if (points.length === 1) {
+    const y = height / 2
+    return `M 0 ${y} L ${width} ${y}`
+  }
+
+  const weights = points.map((point) => point.weight)
+  const minWeight = Math.min(...weights)
+  const maxWeight = Math.max(...weights)
+  const span = maxWeight - minWeight || 1
+
+  return points
+    .map((point, index) => {
+      const x = (index / (points.length - 1)) * width
+      const normalized = (point.weight - minWeight) / span
+      const y = height - normalized * height
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`
+    })
+    .join(' ')
+}
+
+function getLinePointPosition(points: StatsWeightPoint[], index: number, width: number, height: number) {
+  if (points.length === 0) {
+    return { x: 0, y: 0 }
+  }
+
+  if (points.length === 1) {
+    return { x: width / 2, y: height / 2 }
+  }
+
+  const weights = points.map((point) => point.weight)
+  const minWeight = Math.min(...weights)
+  const maxWeight = Math.max(...weights)
+  const span = maxWeight - minWeight || 1
+  const x = (index / (points.length - 1)) * width
+  const normalized = (points[index].weight - minWeight) / span
+  const y = height - normalized * height
+
+  return { x, y }
+}
+
+function triggerWorkoutAlert(title: string, body: string) {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    try {
+      const didVibrate = navigator.vibrate([350, 180, 350, 180, 350])
+      if (!didVibrate) {
+        navigator.vibrate(900)
+      }
+    } catch {
+      // Ignore unsupported vibration errors and keep notification fallback.
+    }
+  }
+
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    new Notification(title, { body })
+  }
+}
+
 function startOfDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
@@ -128,29 +302,95 @@ function addYears(date: Date, years: number) {
   return next
 }
 
+function formatDateInputValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function parseDateInputValue(value: string) {
+  if (!value) {
+    return null
+  }
+
+  const [year, month, day] = value.split('-').map(Number)
+
+  if (!year || !month || !day) {
+    return null
+  }
+
+  const parsedDate = new Date(year, month - 1, day)
+  return Number.isNaN(parsedDate.getTime()) ? null : startOfDay(parsedDate)
+}
+
+function formatHistoryDateValue(value: string) {
+  const parsedDate = parseDateInputValue(value)
+
+  if (!parsedDate) {
+    return 'date invalide'
+  }
+
+  return parsedDate.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
+
 function startOfWeekMonday(date: Date) {
   const day = date.getDay()
   const diff = day === 0 ? -6 : 1 - day
   return startOfDay(addDays(date, diff))
 }
 
-function getHistoryRangeStart(range: HistoryRange, now: Date) {
+function getHistoryRangeBounds(range: HistoryBucketRange, now: Date, oldestStartedAt?: string) {
   if (range === '7d') {
-    return startOfDay(addDays(now, -6))
+    return {
+      start: formatDateInputValue(startOfDay(addDays(now, -6))),
+      end: formatDateInputValue(startOfDay(now)),
+    }
   }
 
   if (range === '1m') {
-    return startOfDay(addDays(now, -29))
+    return {
+      start: formatDateInputValue(startOfDay(addDays(now, -29))),
+      end: formatDateInputValue(startOfDay(now)),
+    }
   }
 
   if (range === '1y') {
-    return startOfDay(addMonths(now, -11))
+    return {
+      start: formatDateInputValue(startOfDay(addMonths(now, -11))),
+      end: formatDateInputValue(startOfDay(now)),
+    }
   }
 
-  return null
+  return {
+    start: formatDateInputValue(startOfDay(oldestStartedAt ? new Date(oldestStartedAt) : now)),
+    end: formatDateInputValue(startOfDay(now)),
+  }
 }
 
-function formatHistoryBucketLabel(range: HistoryRange, start: Date) {
+function getCustomHistoryBucketRange(start: Date, endExclusive: Date): HistoryBucketRange {
+  const daySpan = Math.max(1, Math.round((endExclusive.getTime() - start.getTime()) / 86400000))
+
+  if (daySpan <= 14) {
+    return '7d'
+  }
+
+  if (daySpan <= 90) {
+    return '1m'
+  }
+
+  if (daySpan <= 730) {
+    return '1y'
+  }
+
+  return 'all'
+}
+
+function formatHistoryBucketLabel(range: HistoryBucketRange, start: Date) {
   if (range === '7d') {
     return start.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
   }
@@ -166,7 +406,7 @@ function formatHistoryBucketLabel(range: HistoryRange, start: Date) {
   return String(start.getFullYear())
 }
 
-function formatHistoryBucketTitle(range: HistoryRange, start: Date, end: Date) {
+function formatHistoryBucketTitle(range: HistoryBucketRange, start: Date, end: Date) {
   if (range === '7d') {
     return start.toLocaleDateString('fr-FR', {
       weekday: 'long',
@@ -418,6 +658,274 @@ function csvEscape(value: string | number | undefined) {
   return `"${text.replace(/"/g, '""')}"`
 }
 
+function getLocalDataUpdatedAt(
+  templates: RoutineTemplate[],
+  sessionHistory: WorkoutSession[],
+  activeSession: WorkoutSession | null,
+) {
+  const candidates = [
+    ...templates.map((template) => template.updatedAt),
+    ...sessionHistory.map((session) => session.endedAt ?? session.startedAt),
+  ]
+
+  if (activeSession) {
+    candidates.push(activeSession.startedAt)
+  }
+
+  if (candidates.length === 0) {
+    return new Date(0).toISOString()
+  }
+
+  return candidates.sort().at(-1) ?? new Date(0).toISOString()
+}
+
+function toSafeTimestamp(value?: string) {
+  if (!value) {
+    return 0
+  }
+
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function getSessionMergeKey(session: WorkoutSession) {
+  return `${session.startedAt}__${session.templateName}`
+}
+
+function getSessionSetCount(session: WorkoutSession) {
+  return session.exercises.reduce((count, exercise) => count + exercise.sets.length, 0)
+}
+
+function pickMostRelevantSession(left: WorkoutSession, right: WorkoutSession) {
+  const leftUpdatedAt = toSafeTimestamp(left.endedAt ?? left.startedAt)
+  const rightUpdatedAt = toSafeTimestamp(right.endedAt ?? right.startedAt)
+
+  if (leftUpdatedAt !== rightUpdatedAt) {
+    return rightUpdatedAt > leftUpdatedAt ? right : left
+  }
+
+  const leftSetCount = getSessionSetCount(left)
+  const rightSetCount = getSessionSetCount(right)
+
+  if (leftSetCount !== rightSetCount) {
+    return rightSetCount > leftSetCount ? right : left
+  }
+
+  return left
+}
+
+function mergeTemplatesById(localTemplates: RoutineTemplate[], remoteTemplates: RoutineTemplate[]) {
+  const mergedById = new Map<string, RoutineTemplate>()
+
+  localTemplates.forEach((template) => {
+    mergedById.set(template.id, template)
+  })
+
+  remoteTemplates.forEach((remoteTemplate) => {
+    const localTemplate = mergedById.get(remoteTemplate.id)
+
+    if (!localTemplate) {
+      mergedById.set(remoteTemplate.id, remoteTemplate)
+      return
+    }
+
+    const localUpdatedAt = toSafeTimestamp(localTemplate.updatedAt)
+    const remoteUpdatedAt = toSafeTimestamp(remoteTemplate.updatedAt)
+
+    mergedById.set(remoteTemplate.id, remoteUpdatedAt > localUpdatedAt ? remoteTemplate : localTemplate)
+  })
+
+  return Array.from(mergedById.values()).sort(
+    (left, right) => toSafeTimestamp(right.updatedAt) - toSafeTimestamp(left.updatedAt),
+  )
+}
+
+function mergeSessionsByKey(localSessions: WorkoutSession[], remoteSessions: WorkoutSession[]) {
+  const mergedByKey = new Map<string, WorkoutSession>()
+
+  localSessions.forEach((session) => {
+    mergedByKey.set(getSessionMergeKey(session), session)
+  })
+
+  remoteSessions.forEach((remoteSession) => {
+    const key = getSessionMergeKey(remoteSession)
+    const localSession = mergedByKey.get(key)
+
+    if (!localSession) {
+      mergedByKey.set(key, remoteSession)
+      return
+    }
+
+    mergedByKey.set(key, pickMostRelevantSession(localSession, remoteSession))
+  })
+
+  return Array.from(mergedByKey.values()).sort(
+    (left, right) => toSafeTimestamp(right.startedAt) - toSafeTimestamp(left.startedAt),
+  )
+}
+
+function mergeActiveSession(
+  localActiveSession: WorkoutSession | null,
+  remoteActiveSession: WorkoutSession | null,
+) {
+  if (!localActiveSession && !remoteActiveSession) {
+    return null
+  }
+
+  if (!localActiveSession) {
+    return remoteActiveSession
+  }
+
+  if (!remoteActiveSession) {
+    return localActiveSession
+  }
+
+  return pickMostRelevantSession(localActiveSession, remoteActiveSession)
+}
+
+type MergePreviewStats = {
+  localCount: number
+  remoteCount: number
+  addedFromRemote: number
+  replacedByRemote: number
+  keptLocal: number
+  mergedCount: number
+}
+
+type ActiveSessionMergePreview = {
+  decision: 'none' | 'keep-local' | 'take-remote'
+}
+
+type GoogleDriveMergePreview = {
+  remoteUpdatedAt: string
+  localUpdatedAt: string
+  templates: MergePreviewStats
+  sessions: MergePreviewStats
+  activeSession: ActiveSessionMergePreview
+  blockedByTimestampGuard: boolean
+}
+
+function computeTemplateMergeStats(
+  localTemplates: RoutineTemplate[],
+  remoteTemplates: RoutineTemplate[],
+): MergePreviewStats {
+  const localById = new Map(localTemplates.map((template) => [template.id, template]))
+
+  let addedFromRemote = 0
+  let replacedByRemote = 0
+  let keptLocal = 0
+
+  remoteTemplates.forEach((remoteTemplate) => {
+    const localTemplate = localById.get(remoteTemplate.id)
+
+    if (!localTemplate) {
+      addedFromRemote += 1
+      return
+    }
+
+    if (toSafeTimestamp(remoteTemplate.updatedAt) > toSafeTimestamp(localTemplate.updatedAt)) {
+      replacedByRemote += 1
+      return
+    }
+
+    keptLocal += 1
+  })
+
+  const mergedCount = mergeTemplatesById(localTemplates, remoteTemplates).length
+
+  return {
+    localCount: localTemplates.length,
+    remoteCount: remoteTemplates.length,
+    addedFromRemote,
+    replacedByRemote,
+    keptLocal,
+    mergedCount,
+  }
+}
+
+function computeSessionMergeStats(
+  localSessions: WorkoutSession[],
+  remoteSessions: WorkoutSession[],
+): MergePreviewStats {
+  const localByKey = new Map(localSessions.map((session) => [getSessionMergeKey(session), session]))
+
+  let addedFromRemote = 0
+  let replacedByRemote = 0
+  let keptLocal = 0
+
+  remoteSessions.forEach((remoteSession) => {
+    const localSession = localByKey.get(getSessionMergeKey(remoteSession))
+
+    if (!localSession) {
+      addedFromRemote += 1
+      return
+    }
+
+    const preferred = pickMostRelevantSession(localSession, remoteSession)
+
+    if (preferred === remoteSession) {
+      replacedByRemote += 1
+    } else {
+      keptLocal += 1
+    }
+  })
+
+  const mergedCount = mergeSessionsByKey(localSessions, remoteSessions).length
+
+  return {
+    localCount: localSessions.length,
+    remoteCount: remoteSessions.length,
+    addedFromRemote,
+    replacedByRemote,
+    keptLocal,
+    mergedCount,
+  }
+}
+
+function computeActiveSessionMergePreview(
+  localActiveSession: WorkoutSession | null,
+  remoteActiveSession: WorkoutSession | null,
+): ActiveSessionMergePreview {
+  if (!localActiveSession && !remoteActiveSession) {
+    return { decision: 'none' }
+  }
+
+  if (!localActiveSession && remoteActiveSession) {
+    return { decision: 'take-remote' }
+  }
+
+  if (localActiveSession && !remoteActiveSession) {
+    return { decision: 'keep-local' }
+  }
+
+  const merged = mergeActiveSession(localActiveSession, remoteActiveSession)
+
+  if (!merged || !localActiveSession || !remoteActiveSession) {
+    return { decision: 'none' }
+  }
+
+  return merged === remoteActiveSession ? { decision: 'take-remote' } : { decision: 'keep-local' }
+}
+
+function computeGoogleDriveMergePreview(
+  localTemplates: RoutineTemplate[],
+  localSessionHistory: WorkoutSession[],
+  localActiveSession: WorkoutSession | null,
+  remoteBackup: GoogleDriveBackupPayload,
+): GoogleDriveMergePreview {
+  const localUpdatedAt = getLocalDataUpdatedAt(localTemplates, localSessionHistory, localActiveSession)
+  const remoteUpdatedAt = remoteBackup.updatedAt
+
+  return {
+    remoteUpdatedAt,
+    localUpdatedAt,
+    templates: computeTemplateMergeStats(localTemplates, remoteBackup.templates),
+    sessions: computeSessionMergeStats(localSessionHistory, remoteBackup.sessionHistory),
+    activeSession: computeActiveSessionMergePreview(localActiveSession, remoteBackup.activeSession),
+    blockedByTimestampGuard: new Date(remoteUpdatedAt).getTime() <= new Date(localUpdatedAt).getTime(),
+  }
+}
+
 function MenuIcon({ view }: { view: ActiveView }) {
   const commonProps = {
     width: 20,
@@ -457,6 +965,25 @@ function MenuIcon({ view }: { view: ActiveView }) {
     <svg {...commonProps}>
       <circle cx="12" cy="12" r="8" />
       <path d="M12 8v4l3 2" />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 6l12 12" />
+      <path d="M18 6L6 18" />
     </svg>
   )
 }
@@ -596,6 +1123,11 @@ function App() {
   const initialActiveSession = loadActiveSession()
   const initialHistory = loadSessionHistory()
   const initialTemplates = loadTemplates()
+  const initialHistoryBounds = getHistoryRangeBounds(
+    '7d',
+    new Date(),
+    initialHistory[initialHistory.length - 1]?.startedAt,
+  )
 
   const [templates, setTemplates] = useState<RoutineTemplate[]>(() => initialTemplates)
   const [sessionHistory, setSessionHistory] = useState<WorkoutSession[]>(initialHistory)
@@ -616,6 +1148,11 @@ function App() {
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null)
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0)
   const [historyRange, setHistoryRange] = useState<HistoryRange>('7d')
+  const [historyDateStart, setHistoryDateStart] = useState(initialHistoryBounds.start)
+  const [historyDateEnd, setHistoryDateEnd] = useState(initialHistoryBounds.end)
+  const [statsRange, setStatsRange] = useState<HistoryRange>('1m')
+  const [statsDateStart, setStatsDateStart] = useState(() => getHistoryRangeBounds('1m', new Date(), initialHistory[initialHistory.length - 1]?.startedAt).start)
+  const [statsDateEnd, setStatsDateEnd] = useState(() => getHistoryRangeBounds('1m', new Date(), initialHistory[initialHistory.length - 1]?.startedAt).end)
   const [isHistoryDetailOpen, setIsHistoryDetailOpen] = useState(false)
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     initialHistory[0]?.id ?? null,
@@ -623,10 +1160,23 @@ function App() {
   const [isExerciseImageBroken, setIsExerciseImageBroken] = useState(false)
   const [isResting, setIsResting] = useState(false)
   const [restRemaining, setRestRemaining] = useState(0)
-  const [restSetId, setRestSetId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
+  const [isRestDonePopupOpen, setIsRestDonePopupOpen] = useState(false)
   const [isWatchStartPopupOpen, setIsWatchStartPopupOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [appTheme, setAppTheme] = useState<AppThemeId>(() => loadAppTheme())
+  const [isStatsOpen, setIsStatsOpen] = useState(false)
+  const [statsMachineFilter, setStatsMachineFilter] = useState('all')
+  const [googleProfile, setGoogleProfile] = useState<GoogleIdentityProfile | null>(null)
+  const [googleAccessToken, setGoogleAccessToken] = useState('')
+  const [isGoogleAuthLoading, setIsGoogleAuthLoading] = useState(false)
+  const [isGoogleDriveSyncLoading, setIsGoogleDriveSyncLoading] = useState(false)
+  const [isGoogleDrivePullLoading, setIsGoogleDrivePullLoading] = useState(false)
+  const [isGoogleDrivePreviewLoading, setIsGoogleDrivePreviewLoading] = useState(false)
+  const [googleDrivePreview, setGoogleDrivePreview] = useState<{
+    remoteBackup: GoogleDriveBackupPayload
+    summary: GoogleDriveMergePreview
+  } | null>(null)
   const [isFinishRecapOpen, setIsFinishRecapOpen] = useState(false)
   const [pendingScrollSetId, setPendingScrollSetId] = useState<string | null>(null)
   const [activeSetByExerciseId, setActiveSetByExerciseId] = useState<Record<string, string>>({})
@@ -641,6 +1191,7 @@ function App() {
   )
 
   const selectedIds = useMemo(() => new Set(selected.map((item) => item.exerciseId)), [selected])
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '').trim()
 
   const filteredExercises = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -659,14 +1210,19 @@ function App() {
 
   const historyOverview = useMemo(() => {
     const now = new Date()
-    const rangeStart = getHistoryRangeStart(historyRange, now)
+    const fallbackBounds = getHistoryRangeBounds('7d', now, sessionHistory[sessionHistory.length - 1]?.startedAt)
+    const parsedStart = parseDateInputValue(historyDateStart) ?? parseDateInputValue(fallbackBounds.start)
+    const parsedEnd = parseDateInputValue(historyDateEnd) ?? parseDateInputValue(fallbackBounds.end)
+    const tentativeStart = parsedStart ?? startOfDay(addDays(now, -6))
+    const tentativeEnd = parsedEnd ?? startOfDay(now)
+    const rangeStart = tentativeStart.getTime() <= tentativeEnd.getTime() ? tentativeStart : tentativeEnd
+    const rangeEnd = tentativeStart.getTime() <= tentativeEnd.getTime() ? tentativeEnd : tentativeStart
+    const rangeEndExclusive = addDays(rangeEnd, 1)
+    const bucketRange = historyRange === 'custom' ? getCustomHistoryBucketRange(rangeStart, rangeEndExclusive) : historyRange
     const historyInRange = sessionHistory
       .filter((session) => {
-        if (!rangeStart) {
-          return true
-        }
-
-        return new Date(session.startedAt).getTime() >= rangeStart.getTime()
+        const sessionTime = new Date(session.startedAt).getTime()
+        return sessionTime >= rangeStart.getTime() && sessionTime < rangeEndExclusive.getTime()
       })
       .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime())
 
@@ -679,33 +1235,35 @@ function App() {
       sessions: WorkoutSession[]
     }> = []
 
-    if (historyRange === '7d') {
-      for (let offset = 6; offset >= 0; offset -= 1) {
-        const start = startOfDay(addDays(now, -offset))
+    if (bucketRange === '7d') {
+      let cursor = rangeStart
+
+      while (cursor.getTime() < rangeEndExclusive.getTime()) {
+        const start = cursor
         const end = addDays(start, 1)
         buckets.push({
           key: start.toISOString(),
-          label: formatHistoryBucketLabel(historyRange, start),
-          title: formatHistoryBucketTitle(historyRange, start, end),
+          label: formatHistoryBucketLabel(bucketRange, start),
+          title: formatHistoryBucketTitle(bucketRange, start, end),
           start,
           end,
           sessions: [],
         })
-      }
-    } else if (historyRange === '1m') {
-      const from = rangeStart ?? startOfDay(addDays(now, -29))
-      const until = addDays(startOfDay(now), 1)
-      let cursor = startOfWeekMonday(from)
 
-      while (cursor.getTime() < until.getTime()) {
-        const start = cursor.getTime() < from.getTime() ? from : cursor
+        cursor = end
+      }
+    } else if (bucketRange === '1m') {
+      let cursor = startOfWeekMonday(rangeStart)
+
+      while (cursor.getTime() < rangeEndExclusive.getTime()) {
+        const start = cursor.getTime() < rangeStart.getTime() ? rangeStart : cursor
         const end = addDays(cursor, 7)
-        const boundedEnd = end.getTime() > until.getTime() ? until : end
+        const boundedEnd = end.getTime() > rangeEndExclusive.getTime() ? rangeEndExclusive : end
 
         buckets.push({
           key: start.toISOString(),
-          label: formatHistoryBucketLabel(historyRange, start),
-          title: formatHistoryBucketTitle(historyRange, start, boundedEnd),
+          label: formatHistoryBucketLabel(bucketRange, start),
+          title: formatHistoryBucketTitle(bucketRange, start, boundedEnd),
           start,
           end: boundedEnd,
           sessions: [],
@@ -713,33 +1271,35 @@ function App() {
 
         cursor = addDays(cursor, 7)
       }
-    } else if (historyRange === '1y') {
-      for (let offset = 11; offset >= 0; offset -= 1) {
-        const monthCursor = addMonths(startOfDay(now), -offset)
+    } else if (bucketRange === '1y') {
+      let monthCursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1)
+
+      while (monthCursor.getTime() < rangeEndExclusive.getTime()) {
         const start = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1)
         const end = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)
 
         buckets.push({
           key: start.toISOString(),
-          label: formatHistoryBucketLabel(historyRange, start),
-          title: formatHistoryBucketTitle(historyRange, start, end),
+          label: formatHistoryBucketLabel(bucketRange, start),
+          title: formatHistoryBucketTitle(bucketRange, start, end),
           start,
           end,
           sessions: [],
         })
+
+        monthCursor = end
       }
     } else {
-      const oldest = sessionHistory[sessionHistory.length - 1]
-      const fromYear = oldest ? new Date(oldest.startedAt).getFullYear() : now.getFullYear()
-      const toYear = now.getFullYear()
+      const fromYear = rangeStart.getFullYear()
+      const toYear = rangeEnd.getFullYear()
 
       for (let year = fromYear; year <= toYear; year += 1) {
         const start = new Date(year, 0, 1)
         const end = addYears(start, 1)
         buckets.push({
           key: String(year),
-          label: formatHistoryBucketLabel(historyRange, start),
-          title: formatHistoryBucketTitle(historyRange, start, end),
+          label: formatHistoryBucketLabel(bucketRange, start),
+          title: formatHistoryBucketTitle(bucketRange, start, end),
           start,
           end,
           sessions: [],
@@ -760,8 +1320,11 @@ function App() {
       buckets,
       totalCount: historyInRange.length,
       maxBucketCount: Math.max(1, ...buckets.map((bucket) => bucket.sessions.length)),
+      rangeLabel: `${formatHistoryDateValue(formatDateInputValue(rangeStart))} au ${formatHistoryDateValue(
+        formatDateInputValue(rangeEnd),
+      )}`,
     }
-  }, [sessionHistory, historyRange])
+  }, [sessionHistory, historyRange, historyDateStart, historyDateEnd])
 
   const selectedSession = useMemo(() => {
     if (historyOverview.sessions.length === 0) {
@@ -773,6 +1336,121 @@ function App() {
       historyOverview.sessions[0]
     )
   }, [historyOverview.sessions, selectedSessionId])
+
+  const statsOverview = useMemo<StatsOverview>(() => {
+    const fallbackBounds = getHistoryRangeBounds('1m', new Date(), sessionHistory[sessionHistory.length - 1]?.startedAt)
+    const parsedStart = parseDateInputValue(statsDateStart) ?? parseDateInputValue(fallbackBounds.start)
+    const parsedEnd = parseDateInputValue(statsDateEnd) ?? parseDateInputValue(fallbackBounds.end)
+    const tentativeStart = parsedStart ?? startOfDay(addDays(new Date(), -29))
+    const tentativeEnd = parsedEnd ?? startOfDay(new Date())
+    const rangeStart = tentativeStart.getTime() <= tentativeEnd.getTime() ? tentativeStart : tentativeEnd
+    const rangeEnd = tentativeStart.getTime() <= tentativeEnd.getTime() ? tentativeEnd : tentativeStart
+    const rangeEndExclusive = addDays(rangeEnd, 1)
+    const completedSessions = sessionHistory
+      .filter((session) => Boolean(session.endedAt))
+      .filter((session) => {
+        const sessionTime = new Date(session.startedAt).getTime()
+        return sessionTime >= rangeStart.getTime() && sessionTime < rangeEndExclusive.getTime()
+      })
+      .sort((left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime())
+
+    const usageMap = new Map<string, StatsUsagePoint>()
+    const points: StatsWeightPoint[] = []
+
+    completedSessions.forEach((session) => {
+      const machinesSeenInSession = new Set<string>()
+
+      session.exercises.forEach((exercise) => {
+        const exerciseInfo = EXERCISES.find((entry) => entry.id === exercise.exerciseId)
+        const machineId = exercise.exerciseId
+        const machineLabel = exerciseInfo?.name ?? 'Machine inconnue'
+        let maxWeightForExerciseInSession = 0
+        let countedSets = 0
+
+        exercise.sets.forEach((set) => {
+          if (set.actualWeight > 0) {
+            countedSets += 1
+            if (set.actualWeight > maxWeightForExerciseInSession) {
+              maxWeightForExerciseInSession = set.actualWeight
+            }
+          }
+        })
+
+        if (countedSets === 0) {
+          return
+        }
+
+        const currentUsage = usageMap.get(machineId) ?? {
+          machineId,
+          label: machineLabel,
+          sessions: 0,
+          sets: 0,
+          maxWeight: 0,
+        }
+
+        currentUsage.sets += countedSets
+        currentUsage.maxWeight = Math.max(currentUsage.maxWeight, maxWeightForExerciseInSession)
+
+        if (!machinesSeenInSession.has(machineId)) {
+          currentUsage.sessions += 1
+          machinesSeenInSession.add(machineId)
+        }
+
+        usageMap.set(machineId, currentUsage)
+
+        points.push({
+          key: `${session.id}-${machineId}`,
+          label: formatStatDateLabel(session.startedAt),
+          machineId,
+          machineLabel,
+          weight: maxWeightForExerciseInSession,
+          date: session.startedAt,
+        })
+      })
+    })
+
+    const usage = Array.from(usageMap.values()).sort((left, right) => {
+      if (right.sessions !== left.sessions) {
+        return right.sessions - left.sessions
+      }
+
+      if (right.sets !== left.sets) {
+        return right.sets - left.sets
+      }
+
+      return left.label.localeCompare(right.label, 'fr')
+    })
+
+    const machineOptions = usage.map((entry) => ({ id: entry.machineId, label: entry.label }))
+    const activeMachineId =
+      statsMachineFilter !== 'all' && machineOptions.some((option) => option.id === statsMachineFilter)
+        ? statsMachineFilter
+        : 'all'
+    const filteredUsage =
+      activeMachineId === 'all' ? usage : usage.filter((entry) => entry.machineId === activeMachineId)
+    const weightPoints = points.filter((point) => activeMachineId === 'all' || point.machineId === activeMachineId)
+
+    return {
+      hasCompletedSessions: completedSessions.length > 0,
+      machineOptions,
+      selectedMachineLabel:
+        activeMachineId === 'all'
+          ? 'Toutes les machines'
+          : machineOptions.find((option) => option.id === activeMachineId)?.label ?? 'Machine inconnue',
+      rangeLabel: `${formatHistoryDateValue(formatDateInputValue(rangeStart))} au ${formatHistoryDateValue(
+        formatDateInputValue(rangeEnd),
+      )}`,
+      totalSessions:
+        activeMachineId === 'all'
+          ? completedSessions.length
+          : filteredUsage.reduce((sum, entry) => sum + entry.sessions, 0),
+      totalSets: filteredUsage.reduce((sum, entry) => sum + entry.sets, 0),
+      maxWeight: weightPoints.length > 0 ? Math.max(...weightPoints.map((point) => point.weight)) : 0,
+      usage,
+      filteredUsage,
+      weightPoints,
+    }
+  }, [sessionHistory, statsMachineFilter, statsDateEnd, statsDateStart])
 
   const currentExercise = activeSession?.exercises[currentExerciseIndex] ?? null
   const currentExerciseInfo = currentExercise
@@ -796,6 +1474,14 @@ function App() {
   }, [currentExercise, activeSetByExerciseId])
   const currentSet =
     currentExercise && currentSetIndex >= 0 ? currentExercise.sets[currentSetIndex] : null
+  const upcomingRestSeconds = Math.max(0, currentSet?.restSeconds ?? 0)
+  const restWidgetLabel = isResting ? 'Chrono en cours' : 'Prochain chrono'
+  const restWidgetValue = isResting ? restRemaining : upcomingRestSeconds
+  const restWidgetHint = isResting
+    ? 'Decompte en cours'
+    : upcomingRestSeconds > 0
+      ? 'Demarre au clic sur Valider'
+      : 'Aucun repos configure pour ce set'
 
   const sessionExerciseTabs = useMemo(() => {
     if (!activeSession) {
@@ -839,6 +1525,36 @@ function App() {
   }, [templates])
 
   useEffect(() => {
+    if (historyRange === 'custom') {
+      return
+    }
+
+    const nextBounds = getHistoryRangeBounds(
+      historyRange,
+      new Date(),
+      sessionHistory[sessionHistory.length - 1]?.startedAt,
+    )
+
+    setHistoryDateStart(nextBounds.start)
+    setHistoryDateEnd(nextBounds.end)
+  }, [historyRange, sessionHistory])
+
+  useEffect(() => {
+    if (statsRange === 'custom') {
+      return
+    }
+
+    const nextBounds = getHistoryRangeBounds(
+      statsRange,
+      new Date(),
+      sessionHistory[sessionHistory.length - 1]?.startedAt,
+    )
+
+    setStatsDateStart(nextBounds.start)
+    setStatsDateEnd(nextBounds.end)
+  }, [statsRange, sessionHistory])
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return
     }
@@ -850,6 +1566,32 @@ function App() {
   }, [collapsedTemplateExercises])
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(APP_THEME_STORAGE_KEY, appTheme)
+  }, [appTheme])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    document.body.dataset.theme = appTheme
+  }, [appTheme])
+
+  useEffect(() => {
+    if (statsMachineFilter === 'all') {
+      return
+    }
+
+    if (!statsOverview.machineOptions.some((option) => option.id === statsMachineFilter)) {
+      setStatsMachineFilter('all')
+    }
+  }, [statsMachineFilter, statsOverview.machineOptions])
+
+  useEffect(() => {
     if (!isResting || restRemaining <= 0) {
       return undefined
     }
@@ -859,11 +1601,9 @@ function App() {
         if (current <= 1) {
           window.clearInterval(timer)
           setIsResting(false)
-          setRestSetId(null)
           setNotice('Repos terminé.')
-          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-            new Notification('Strong Simon', { body: 'Le temps de repos est terminé.' })
-          }
+          setIsRestDonePopupOpen(true)
+          triggerWorkoutAlert('Strong Simon', 'Le temps de repos est terminé.')
           return 0
         }
 
@@ -965,6 +1705,42 @@ function App() {
 
   function showNotice(message: string) {
     setNotice(message)
+  }
+
+  function applyHistoryPreset(range: HistoryBucketRange) {
+    const nextBounds = getHistoryRangeBounds(range, new Date(), sessionHistory[sessionHistory.length - 1]?.startedAt)
+    setHistoryRange(range)
+    setHistoryDateStart(nextBounds.start)
+    setHistoryDateEnd(nextBounds.end)
+  }
+
+  function updateHistoryDateBoundary(boundary: 'start' | 'end', value: string) {
+    setHistoryRange('custom')
+
+    if (boundary === 'start') {
+      setHistoryDateStart(value)
+      return
+    }
+
+    setHistoryDateEnd(value)
+  }
+
+  function applyStatsPreset(range: HistoryBucketRange) {
+    const nextBounds = getHistoryRangeBounds(range, new Date(), sessionHistory[sessionHistory.length - 1]?.startedAt)
+    setStatsRange(range)
+    setStatsDateStart(nextBounds.start)
+    setStatsDateEnd(nextBounds.end)
+  }
+
+  function updateStatsDateBoundary(boundary: 'start' | 'end', value: string) {
+    setStatsRange('custom')
+
+    if (boundary === 'start') {
+      setStatsDateStart(value)
+      return
+    }
+
+    setStatsDateEnd(value)
   }
 
   function removeExercise(exerciseId: string) {
@@ -1124,7 +1900,7 @@ function App() {
     setActiveView('session')
     setIsResting(false)
     setRestRemaining(0)
-    setRestSetId(null)
+    setIsRestDonePopupOpen(false)
     setIsFinishRecapOpen(false)
     setIsWatchStartPopupOpen(true)
   }
@@ -1294,20 +2070,16 @@ function App() {
       return
     }
     const targetSet = exercise.sets[setIndex]
-    const shouldInvalidate = Boolean(targetSet.completedAt)
+    const restDuration = targetSet.restSeconds
 
-    let restDuration = 0
-
-    if (isResting && !shouldInvalidate) {
-      setIsResting(false)
-      setRestRemaining(0)
-      setRestSetId(null)
+    // Validation is idempotent: repeated taps should not unvalidate a set.
+    if (targetSet.completedAt) {
+      return
     }
 
-    if (shouldInvalidate && restSetId === setId) {
+    if (isResting) {
       setIsResting(false)
       setRestRemaining(0)
-      setRestSetId(null)
     }
 
     setActiveSession((previous) => {
@@ -1329,10 +2101,9 @@ function App() {
                 return set
               }
 
-              restDuration = set.restSeconds
               return {
                 ...set,
-                completedAt: shouldInvalidate ? undefined : new Date().toISOString(),
+                completedAt: new Date().toISOString(),
               }
             }),
           }
@@ -1340,14 +2111,10 @@ function App() {
       }
     })
 
-    if (shouldInvalidate) {
-      return
-    }
-
     if (restDuration > 0) {
       setRestRemaining(restDuration)
       setIsResting(true)
-      setRestSetId(setId)
+      setIsRestDonePopupOpen(false)
     }
 
     if (setIndex < exercise.sets.length - 1) {
@@ -1402,11 +2169,12 @@ function App() {
     setActiveView('history')
     setActiveSession(null)
     setIsFinishRecapOpen(false)
+    triggerWorkoutAlert('Strong Simon', 'Ta séance est terminée et enregistrée.')
     setActiveSetByExerciseId({})
     setCurrentExerciseIndex(0)
     setIsResting(false)
     setRestRemaining(0)
-    setRestSetId(null)
+    setIsRestDonePopupOpen(false)
     showNotice('Seance terminee et enregistree.')
   }
 
@@ -1442,6 +2210,7 @@ function App() {
         return
       }
 
+      
       let importedCount = 0
       let skippedCount = 0
 
@@ -1478,6 +2247,194 @@ function App() {
     } catch {
       showNotice('Import impossible: fichier CSV invalide.')
     }
+  }
+
+  async function connectWithGoogle() {
+    if (!googleClientId) {
+      showNotice('Google Client ID manquant. Configure VITE_GOOGLE_CLIENT_ID dans .env.local.')
+      return
+    }
+
+    setIsGoogleAuthLoading(true)
+
+    try {
+      const result = await signInWithGoogle(googleClientId)
+      setGoogleAccessToken(result.accessToken)
+      setGoogleProfile(result.profile)
+
+      if (result.profile.givenName || result.profile.familyName) {
+        showNotice(`Connecte avec Google: ${result.profile.givenName} ${result.profile.familyName}`.trim())
+      } else {
+        showNotice(`Connecte avec Google: ${result.profile.fullName || 'profil recupere'}.`)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Connexion Google impossible.'
+      showNotice(message)
+    } finally {
+      setIsGoogleAuthLoading(false)
+    }
+  }
+
+  async function disconnectGoogle() {
+    setIsGoogleAuthLoading(true)
+
+    try {
+      await revokeGoogleAccess(googleAccessToken)
+    } catch {
+      // Keep local state cleanup even if revoke call fails.
+    } finally {
+      setGoogleAccessToken('')
+      setGoogleProfile(null)
+      setGoogleDrivePreview(null)
+      setIsGoogleAuthLoading(false)
+    }
+
+    showNotice('Compte Google deconnecte.')
+  }
+
+  async function syncDataToGoogleDrive() {
+    if (!googleAccessToken) {
+      showNotice('Connecte ton compte Google avant la synchronisation Drive.')
+      return
+    }
+
+    setIsGoogleDriveSyncLoading(true)
+
+    try {
+      const result = await syncTemplatesAndSessionsToGoogleDrive(googleAccessToken, {
+        templates,
+        sessionHistory,
+        activeSession,
+      })
+      showNotice(`Synchronisation Drive terminee (${result.updatedCount} fichiers, ${result.updatedAt}).`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Synchronisation Drive impossible.'
+      showNotice(message)
+    } finally {
+      setIsGoogleDriveSyncLoading(false)
+    }
+  }
+
+  async function importDataFromGoogleDrive(options?: {
+    forceReplace?: boolean
+    remoteBackup?: GoogleDriveBackupPayload
+  }) {
+    if (!googleAccessToken) {
+      showNotice('Connecte ton compte Google avant l\'import Drive.')
+      return
+    }
+
+    const forceReplace = Boolean(options?.forceReplace)
+
+    if (forceReplace) {
+      const shouldContinue = window.confirm(
+        'Forcer l\'import va remplacer toutes les donnees locales par la sauvegarde Drive. Continuer ?',
+      )
+
+      if (!shouldContinue) {
+        return
+      }
+    }
+
+    setIsGoogleDrivePullLoading(true)
+
+    try {
+      const remoteBackup =
+        options?.remoteBackup ?? (await pullTemplatesAndSessionsFromGoogleDrive(googleAccessToken))
+
+      if (!remoteBackup) {
+        showNotice('Aucune sauvegarde Drive trouvee.')
+        return
+      }
+
+      const localUpdatedAt = getLocalDataUpdatedAt(templates, sessionHistory, activeSession)
+
+      if (!forceReplace && new Date(remoteBackup.updatedAt).getTime() <= new Date(localUpdatedAt).getTime()) {
+        showNotice('Conflit evite: les donnees locales sont plus recentes ou identiques.')
+        return
+      }
+
+      const mergedTemplates = forceReplace
+        ? remoteBackup.templates
+        : mergeTemplatesById(templates, remoteBackup.templates)
+
+      const mergedSessions = forceReplace
+        ? remoteBackup.sessionHistory
+        : mergeSessionsByKey(sessionHistory, remoteBackup.sessionHistory)
+
+      const mergedActiveSession = forceReplace
+        ? remoteBackup.activeSession
+        : mergeActiveSession(activeSession, remoteBackup.activeSession)
+
+      setTemplates(mergedTemplates)
+      setSessionHistory(mergedSessions)
+      setActiveSession(mergedActiveSession)
+      setSelectedSessionId(mergedSessions[0]?.id ?? null)
+      setCurrentExerciseIndex(0)
+      setActiveSetByExerciseId({})
+      if (mergedActiveSession) {
+        setActiveView('session')
+      }
+
+      if (forceReplace) {
+        showNotice(`Import Drive force termine. Donnees remplacees (${remoteBackup.updatedAt}).`)
+      } else {
+        showNotice(`Import Drive fusionne termine (${remoteBackup.updatedAt}).`)
+      }
+
+      setGoogleDrivePreview(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Import Drive impossible.'
+      showNotice(message)
+    } finally {
+      setIsGoogleDrivePullLoading(false)
+    }
+  }
+
+  async function previewGoogleDriveImport() {
+    if (!googleAccessToken) {
+      showNotice('Connecte ton compte Google avant la previsualisation Drive.')
+      return
+    }
+
+    setIsGoogleDrivePreviewLoading(true)
+
+    try {
+      const remoteBackup = await pullTemplatesAndSessionsFromGoogleDrive(googleAccessToken)
+
+      if (!remoteBackup) {
+        setGoogleDrivePreview(null)
+        showNotice('Aucune sauvegarde Drive trouvee.')
+        return
+      }
+
+      const summary = computeGoogleDriveMergePreview(
+        templates,
+        sessionHistory,
+        activeSession,
+        remoteBackup,
+      )
+
+      setGoogleDrivePreview({ remoteBackup, summary })
+      showNotice('Previsualisation Drive prete. Verifie les impacts avant application.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Previsualisation Drive impossible.'
+      showNotice(message)
+    } finally {
+      setIsGoogleDrivePreviewLoading(false)
+    }
+  }
+
+  function renderActiveSessionDecision(decision: ActiveSessionMergePreview['decision']) {
+    if (decision === 'take-remote') {
+      return 'Remote remplace locale'
+    }
+
+    if (decision === 'keep-local') {
+      return 'Locale conservee'
+    }
+
+    return 'Aucune seance active'
   }
 
   function exportSessionHistoryCsv() {
@@ -1566,7 +2523,6 @@ function App() {
           >
             <SessionActivityIcon active={Boolean(activeSession)} />
           </span>
-          {isResting && <span className="status-timer-chip">Repos {restRemaining}s</span>}
         </div>
       </header>
 
@@ -1574,6 +2530,31 @@ function App() {
         <p className="notice">
           <span>{notice}</span>
         </p>
+      )}
+
+      {isRestDonePopupOpen && (
+        <div
+          className="rest-done-popup-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setIsRestDonePopupOpen(false)}
+        >
+          <section className="rest-done-popup-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="card-head section-head section-head--tight popup-head">
+              <h3>Repos termine</h3>
+              <button
+                className="popup-close-button"
+                type="button"
+                onClick={() => setIsRestDonePopupOpen(false)}
+                aria-label="Fermer"
+                title="Fermer"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+            <p>Tu peux reprendre la serie suivante.</p>
+          </section>
+        </div>
       )}
 
       {isWatchStartPopupOpen && (
@@ -1584,17 +2565,19 @@ function App() {
           onClick={() => setIsWatchStartPopupOpen(false)}
         >
           <section className="watch-start-panel" onClick={(event) => event.stopPropagation()}>
-            <div className="card-head section-head section-head--tight">
+            <div className="card-head section-head section-head--tight popup-head">
               <div className="watch-start-title">
                 <WatchIcon />
                 <h3>Seance demarree</h3>
               </div>
               <button
-                className="button-compact"
+                className="popup-close-button"
                 type="button"
                 onClick={() => setIsWatchStartPopupOpen(false)}
+                aria-label="Fermer"
+                title="Fermer"
               >
-                Fermer
+                <CloseIcon />
               </button>
             </div>
             <p>Pensez a lancer votre Apple Watch.</p>
@@ -1605,10 +2588,78 @@ function App() {
       {isSettingsOpen && (
         <div className="settings-overlay" role="dialog" aria-modal="true" onClick={() => setIsSettingsOpen(false)}>
           <section className="settings-panel" onClick={(event) => event.stopPropagation()}>
-            <div className="card-head section-head section-head--tight">
+            <div className="card-head section-head section-head--tight popup-head popup-head--flush">
               <h3>Settings</h3>
-              <button className="button-compact" type="button" onClick={() => setIsSettingsOpen(false)}>
-                Fermer
+              <button
+                className="popup-close-button"
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                aria-label="Fermer"
+                title="Fermer"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className="settings-block">
+              <strong>Theme</strong>
+              <p className="panel-intro">
+                Conserve le theme historique ou choisis une ambiance differente.
+              </p>
+              <label>
+                Theme actif
+                <select
+                  value={appTheme}
+                  onChange={(event) => {
+                    const nextTheme = event.target.value
+                    if (isAppThemeId(nextTheme)) {
+                      setAppTheme(nextTheme)
+                    }
+                  }}
+                >
+                  {APP_THEME_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="settings-theme-grid">
+                {APP_THEME_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={
+                      option.id === appTheme
+                        ? 'theme-preview-chip is-active'
+                        : 'theme-preview-chip'
+                    }
+                    onClick={() => setAppTheme(option.id)}
+                  >
+                    <span className={`theme-preview-swatch theme-preview-swatch--${option.id}`} aria-hidden="true" />
+                    <span className="theme-preview-copy">
+                      <strong>{option.label}</strong>
+                      <span>{option.description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="settings-block">
+              <strong>Statistiques</strong>
+              <p className="panel-intro">
+                Ouvre un tableau de bord avec l'evolution des poids et les machines les plus utilisees.
+              </p>
+              <button
+                type="button"
+                className="button-compact"
+                onClick={() => {
+                  setIsStatsOpen(true)
+                  setIsSettingsOpen(false)
+                }}
+              >
+                Voir les statistiques
               </button>
             </div>
 
@@ -1629,6 +2680,381 @@ function App() {
                 />
               </label>
             </div>
+
+            <div className="settings-block">
+              <strong>Compte Google</strong>
+              <p className="panel-intro">
+                Connecte ton compte Google pour recuperer nom et prenom puis synchroniser templates/seances.
+              </p>
+
+              {googleProfile ? (
+                <div className="google-user-card">
+                  <span className="google-user-card__name">
+                    {googleProfile.givenName || googleProfile.familyName
+                      ? `${googleProfile.givenName} ${googleProfile.familyName}`.trim()
+                      : googleProfile.fullName}
+                  </span>
+                  {googleProfile.email && <span className="google-user-card__email">{googleProfile.email}</span>}
+                </div>
+              ) : (
+                <p className="google-disconnected-hint">Aucun compte Google connecte.</p>
+              )}
+
+              {!googleClientId && (
+                <p className="google-config-warning">
+                  Variable manquante: VITE_GOOGLE_CLIENT_ID dans .env.local.
+                </p>
+              )}
+
+              <div className="settings-actions-row">
+                <button
+                  type="button"
+                  className="button-compact"
+                  onClick={connectWithGoogle}
+                  disabled={isGoogleAuthLoading || !googleClientId}
+                >
+                  {isGoogleAuthLoading ? 'Connexion...' : 'Se connecter avec Google'}
+                </button>
+
+                <button
+                  type="button"
+                  className="button-compact"
+                  onClick={syncDataToGoogleDrive}
+                  disabled={!googleAccessToken || isGoogleDriveSyncLoading}
+                >
+                  {isGoogleDriveSyncLoading ? 'Sync en cours...' : 'Synchroniser vers Google Drive'}
+                </button>
+
+                <button
+                  type="button"
+                  className="button-compact"
+                  onClick={previewGoogleDriveImport}
+                  disabled={!googleAccessToken || isGoogleDrivePreviewLoading || isGoogleDrivePullLoading}
+                >
+                  {isGoogleDrivePreviewLoading ? 'Analyse en cours...' : 'Previsualiser import'}
+                </button>
+
+                <button
+                  type="button"
+                  className="button-compact"
+                  onClick={() => {
+                    void importDataFromGoogleDrive()
+                  }}
+                  disabled={!googleAccessToken || isGoogleDrivePullLoading}
+                >
+                  {isGoogleDrivePullLoading ? 'Import en cours...' : 'Importer (fusion intelligente)'}
+                </button>
+
+                <button
+                  type="button"
+                  className="button-compact button-compact--warning"
+                  onClick={() => {
+                    void importDataFromGoogleDrive({ forceReplace: true })
+                  }}
+                  disabled={!googleAccessToken || isGoogleDrivePullLoading}
+                >
+                  {isGoogleDrivePullLoading ? 'Import en cours...' : 'Forcer import (remplacer local)'}
+                </button>
+
+                {googleDrivePreview && (
+                  <article className="google-merge-preview">
+                    <strong>Previsualisation merge Drive</strong>
+                    <p className="google-merge-preview__meta">
+                      Local {googleDrivePreview.summary.localUpdatedAt} | Remote {googleDrivePreview.summary.remoteUpdatedAt}
+                    </p>
+
+                    <div className="google-merge-preview__grid">
+                      <div>
+                        <h4>Templates</h4>
+                        <p>Local: {googleDrivePreview.summary.templates.localCount}</p>
+                        <p>Remote: {googleDrivePreview.summary.templates.remoteCount}</p>
+                        <p>Ajouts remote: {googleDrivePreview.summary.templates.addedFromRemote}</p>
+                        <p>Remplacements remote: {googleDrivePreview.summary.templates.replacedByRemote}</p>
+                        <p>Locaux conserves: {googleDrivePreview.summary.templates.keptLocal}</p>
+                        <p>Total apres merge: {googleDrivePreview.summary.templates.mergedCount}</p>
+                      </div>
+
+                      <div>
+                        <h4>Seances</h4>
+                        <p>Local: {googleDrivePreview.summary.sessions.localCount}</p>
+                        <p>Remote: {googleDrivePreview.summary.sessions.remoteCount}</p>
+                        <p>Ajouts remote: {googleDrivePreview.summary.sessions.addedFromRemote}</p>
+                        <p>Remplacements remote: {googleDrivePreview.summary.sessions.replacedByRemote}</p>
+                        <p>Locales conservees: {googleDrivePreview.summary.sessions.keptLocal}</p>
+                        <p>Total apres merge: {googleDrivePreview.summary.sessions.mergedCount}</p>
+                      </div>
+
+                      <div>
+                        <h4>Seance active</h4>
+                        <p>{renderActiveSessionDecision(googleDrivePreview.summary.activeSession.decision)}</p>
+                      </div>
+                    </div>
+
+                    {googleDrivePreview.summary.blockedByTimestampGuard && (
+                      <p className="google-merge-preview__warning">
+                        Garde active: remote pas plus recent. Utilise Forcer import pour override.
+                      </p>
+                    )}
+
+                    <div className="settings-actions-row">
+                      <button
+                        type="button"
+                        className="button-compact"
+                        onClick={() => {
+                          void importDataFromGoogleDrive({ remoteBackup: googleDrivePreview.remoteBackup })
+                        }}
+                        disabled={isGoogleDrivePullLoading}
+                      >
+                        {isGoogleDrivePullLoading ? 'Import en cours...' : 'Appliquer fusion previsualisee'}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="button-compact button-compact--warning"
+                        onClick={() => {
+                          void importDataFromGoogleDrive({
+                            forceReplace: true,
+                            remoteBackup: googleDrivePreview.remoteBackup,
+                          })
+                        }}
+                        disabled={isGoogleDrivePullLoading}
+                      >
+                        {isGoogleDrivePullLoading ? 'Import en cours...' : 'Appliquer remplacement complet'}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="button-compact"
+                        onClick={() => setGoogleDrivePreview(null)}
+                        disabled={isGoogleDrivePullLoading}
+                      >
+                        Fermer previsualisation
+                      </button>
+                    </div>
+                  </article>
+                )}
+
+                <button
+                  type="button"
+                  className="button-compact button-compact--danger"
+                  onClick={disconnectGoogle}
+                  disabled={!googleAccessToken || isGoogleAuthLoading}
+                >
+                  Deconnecter Google
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {isStatsOpen && (
+        <div className="settings-overlay" role="dialog" aria-modal="true" onClick={() => setIsStatsOpen(false)}>
+          <section className="stats-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="card-head section-head section-head--tight popup-head">
+              <div>
+                <h3>Statistiques</h3>
+                <p className="panel-intro">Analyse des seances terminees et des charges saisies.</p>
+              </div>
+              <button
+                className="popup-close-button"
+                type="button"
+                onClick={() => setIsStatsOpen(false)}
+                aria-label="Fermer"
+                title="Fermer"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className="stats-toolbar">
+              <div className="stats-range-controls" role="group" aria-label="Periode des statistiques">
+                <button
+                  type="button"
+                  className={statsRange === '7d' ? 'button-compact is-active' : 'button-compact'}
+                  onClick={() => applyStatsPreset('7d')}
+                >
+                  7j
+                </button>
+                <button
+                  type="button"
+                  className={statsRange === '1m' ? 'button-compact is-active' : 'button-compact'}
+                  onClick={() => applyStatsPreset('1m')}
+                >
+                  1m
+                </button>
+                <button
+                  type="button"
+                  className={statsRange === '1y' ? 'button-compact is-active' : 'button-compact'}
+                  onClick={() => applyStatsPreset('1y')}
+                >
+                  1a
+                </button>
+                <button
+                  type="button"
+                  className={statsRange === 'all' ? 'button-compact is-active' : 'button-compact'}
+                  onClick={() => applyStatsPreset('all')}
+                >
+                  tout
+                </button>
+              </div>
+
+              <label className="stats-filter-field">
+                <span>Machine</span>
+                <select
+                  value={statsMachineFilter}
+                  onChange={(event) => setStatsMachineFilter(event.target.value)}
+                >
+                  <option value="all">Toutes les machines</option>
+                  {statsOverview.machineOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="stats-date-controls">
+                <label className="history-date-field">
+                  <span>Du</span>
+                  <input
+                    type="date"
+                    value={statsDateStart}
+                    max={statsDateEnd || undefined}
+                    onChange={(event) => updateStatsDateBoundary('start', event.target.value)}
+                  />
+                </label>
+                <label className="history-date-field">
+                  <span>Au</span>
+                  <input
+                    type="date"
+                    value={statsDateEnd}
+                    min={statsDateStart || undefined}
+                    onChange={(event) => updateStatsDateBoundary('end', event.target.value)}
+                  />
+                </label>
+              </div>
+              <p className="stats-filter-hint">
+                Periode affichee: {statsOverview.rangeLabel}. Filtre applique a tous les graphes.
+              </p>
+            </div>
+
+            {!statsOverview.hasCompletedSessions && (
+              <div className="stats-empty-state">
+                <strong>Aucune statistique disponible</strong>
+                <p>Finalise au moins une seance avec des poids renseignes pour afficher les graphes.</p>
+              </div>
+            )}
+
+            {statsOverview.hasCompletedSessions && statsOverview.filteredUsage.length === 0 && (
+              <div className="stats-empty-state">
+                <strong>Aucun resultat pour ce filtre</strong>
+                <p>Essaie une autre machine pour retrouver des donnees exploitables.</p>
+              </div>
+            )}
+
+            {statsOverview.hasCompletedSessions && statsOverview.filteredUsage.length > 0 && (
+              <>
+                <div className="stats-summary-grid">
+                  <article className="stats-summary-card">
+                    <span className="stats-summary-card__label">Seances prises en compte</span>
+                    <strong>{statsOverview.totalSessions}</strong>
+                    <p>{statsOverview.selectedMachineLabel}</p>
+                  </article>
+                  <article className="stats-summary-card">
+                    <span className="stats-summary-card__label">Sets avec poids</span>
+                    <strong>{statsOverview.totalSets}</strong>
+                    <p>Historique filtre</p>
+                  </article>
+                  <article className="stats-summary-card">
+                    <span className="stats-summary-card__label">Charge max observee</span>
+                    <strong>{statsOverview.maxWeight > 0 ? formatWeightValue(statsOverview.maxWeight) : '0 kg'}</strong>
+                    <p>Meilleure performance enregistree</p>
+                  </article>
+                </div>
+
+                <article className="stats-chart-card">
+                  <div className="card-head section-head section-head--tight">
+                    <div>
+                      <h3>Evolution des poids</h3>
+                      <p className="panel-intro">
+                        Poids maximum releve par seance pour {statsOverview.selectedMachineLabel.toLowerCase()}.
+                      </p>
+                    </div>
+                    <span className="history-total-chip">{statsOverview.weightPoints.length} points</span>
+                  </div>
+
+                  {statsOverview.weightPoints.length === 0 ? (
+                    <p className="stats-chart-empty">Aucune charge enregistree pour cette selection.</p>
+                  ) : (
+                    <div className="stats-line-chart" aria-label="Graphique d'evolution des poids">
+                      <svg viewBox="0 0 100 48" preserveAspectRatio="none" role="img">
+                        <path
+                          className="stats-line-chart__path"
+                          d={buildLinePath(statsOverview.weightPoints, 100, 40)}
+                        />
+                        {statsOverview.weightPoints.map((point, index) => {
+                          const position = getLinePointPosition(statsOverview.weightPoints, index, 100, 40)
+
+                          return (
+                            <circle
+                              key={point.key}
+                              cx={position.x}
+                              cy={position.y}
+                              r="1.8"
+                              className="stats-line-chart__dot"
+                            >
+                              <title>{`${point.machineLabel} · ${point.label} · ${formatWeightValue(point.weight)}`}</title>
+                            </circle>
+                          )
+                        })}
+                      </svg>
+
+                      <div className="stats-line-chart__legend">
+                        {statsOverview.weightPoints.map((point) => (
+                          <div className="stats-line-chart__legend-item" key={`legend-${point.key}`}>
+                            <span>{point.label}</span>
+                            <strong>{formatWeightValue(point.weight)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </article>
+
+                <article className="stats-chart-card">
+                  <div className="card-head section-head section-head--tight">
+                    <div>
+                      <h3>Machines les plus utilisees</h3>
+                      <p className="panel-intro">Classement sur les seances terminees avec poids reels saisis.</p>
+                    </div>
+                    <span className="history-total-chip">{statsOverview.usage.length} machines</span>
+                  </div>
+
+                  <div className="stats-usage-list" aria-label="Classement des machines utilisees">
+                    {statsOverview.filteredUsage.map((entry) => {
+                      const maxSessions = Math.max(1, ...statsOverview.filteredUsage.map((item) => item.sessions))
+                      const width = Math.max(10, Math.round((entry.sessions / maxSessions) * 100))
+
+                      return (
+                        <article className="stats-usage-row" key={entry.machineId}>
+                          <div className="stats-usage-row__head">
+                            <strong>{entry.label}</strong>
+                            <span>{entry.sessions} seances</span>
+                          </div>
+                          <div className="stats-usage-row__track">
+                            <div className="stats-usage-row__fill" style={{ width: `${width}%` }} />
+                          </div>
+                          <div className="stats-usage-row__meta">
+                            <span>{entry.sets} sets avec poids</span>
+                            <span>{formatWeightValue(entry.maxWeight)} max</span>
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                </article>
+              </>
+            )}
           </section>
         </div>
       )}
@@ -1668,6 +3094,7 @@ function App() {
               <p>
                 Exercice {currentExerciseIndex + 1} / {activeSession.exercises.length}
               </p>
+
 
               <div className="session-exercise-tabs" role="tablist" aria-label="Exercices de la seance">
                 {sessionExerciseTabs.map(({ exercise, index, isCompleted }) => {
@@ -1723,6 +3150,11 @@ function App() {
                     )}
                   </div>
                 </div>
+                <aside className={isResting ? 'session-rest-widget is-active' : 'session-rest-widget'} aria-live="polite">
+                  <span className="session-rest-widget__label">{restWidgetLabel}</span>
+                  <strong className="session-rest-widget__value">{restWidgetValue}s</strong>
+                  <span className="session-rest-widget__hint">{restWidgetHint}</span>
+                </aside>
               </div>
 
               <div className="set-progress-head" aria-label="Progression des sets">
@@ -2213,17 +3645,19 @@ function App() {
                     className="exercise-picker-panel"
                     onClick={(event) => event.stopPropagation()}
                   >
-                    <div className="card-head section-head section-head--tight">
+                    <div className="card-head section-head section-head--tight popup-head">
                       <div>
                         <h3>Ajouter un exercice</h3>
                         <p className="panel-intro">Recherche par nom ou machine.</p>
                       </div>
                       <button
-                        className="button-compact"
+                        className="popup-close-button"
                         type="button"
                         onClick={() => setIsExercisePickerOpen(false)}
+                        aria-label="Fermer"
+                        title="Fermer"
                       >
-                        Fermer
+                        <CloseIcon />
                       </button>
                     </div>
 
@@ -2279,31 +3713,52 @@ function App() {
             <button
               type="button"
               className={historyRange === '7d' ? 'button-compact is-active' : 'button-compact'}
-              onClick={() => setHistoryRange('7d')}
+              onClick={() => applyHistoryPreset('7d')}
             >
-              last 7 day
+              7j
             </button>
             <button
               type="button"
               className={historyRange === '1m' ? 'button-compact is-active' : 'button-compact'}
-              onClick={() => setHistoryRange('1m')}
+              onClick={() => applyHistoryPreset('1m')}
             >
-              last month
+              1m
             </button>
             <button
               type="button"
               className={historyRange === '1y' ? 'button-compact is-active' : 'button-compact'}
-              onClick={() => setHistoryRange('1y')}
+              onClick={() => applyHistoryPreset('1y')}
             >
-              last year
+              1a
             </button>
             <button
               type="button"
               className={historyRange === 'all' ? 'button-compact is-active' : 'button-compact'}
-              onClick={() => setHistoryRange('all')}
+              onClick={() => applyHistoryPreset('all')}
             >
-              all time
+              tout
             </button>
+          </div>
+          <div className="history-date-controls">
+            <label className="history-date-field">
+              <span>Du</span>
+              <input
+                type="date"
+                value={historyDateStart}
+                max={historyDateEnd || undefined}
+                onChange={(event) => updateHistoryDateBoundary('start', event.target.value)}
+              />
+            </label>
+            <label className="history-date-field">
+              <span>Au</span>
+              <input
+                type="date"
+                value={historyDateEnd}
+                min={historyDateStart || undefined}
+                onChange={(event) => updateHistoryDateBoundary('end', event.target.value)}
+              />
+            </label>
+            <p className="history-range-summary">Periode affichee: {historyOverview.rangeLabel}</p>
           </div>
 
           <article className="history-chart-card">
@@ -2398,7 +3853,7 @@ function App() {
               onClick={() => setIsHistoryDetailOpen(false)}
             >
               <section className="history-detail-popup" onClick={(event) => event.stopPropagation()}>
-                <div className="card-head section-head section-head--tight">
+                <div className="card-head section-head section-head--tight popup-head popup-head--flush">
                   <div>
                     <h3>{selectedSession.templateName}</h3>
                     <p>
@@ -2408,8 +3863,14 @@ function App() {
                         : ''}
                     </p>
                   </div>
-                  <button className="button-compact" type="button" onClick={() => setIsHistoryDetailOpen(false)}>
-                    Fermer
+                  <button
+                    className="popup-close-button"
+                    type="button"
+                    onClick={() => setIsHistoryDetailOpen(false)}
+                    aria-label="Fermer"
+                    title="Fermer"
+                  >
+                    <CloseIcon />
                   </button>
                 </div>
 

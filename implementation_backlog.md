@@ -179,6 +179,81 @@
 - Critere d'acceptation:
   - graphiques affiches sans erreur
 
+### F-03 Page Statistiques depuis Settings
+- Priorite: P1
+- Estimation: M
+- Dependances: E-04, F-02
+- Description: ajouter un acces a une page Statistiques depuis Settings pour afficher l'evolution des poids, les machines utilisees et filtrer les graphes par machine.
+- Critere d'acceptation:
+  - un acces "Statistiques" est visible et actionnable depuis Settings
+  - la page affiche un graphe d'evolution des poids dans le temps a partir des seances terminees
+  - la page affiche un graphe des machines ou exercices les plus utilises
+  - un filtre par machine permet de mettre a jour les graphes de maniere coherente
+  - un etat vide est affiche si aucune seance terminee n'est disponible
+  - un message explicite est affiche si le filtre selectionne ne retourne aucune donnee
+  - le rendu reste lisible sur mobile et desktop
+
+#### F-03a Ajouter l'entree Statistiques dans Settings
+- Priorite: P1
+- Estimation: XS
+- Dependances: F-03
+- Description: ajouter dans Settings une action permettant d'ouvrir la page ou le panneau Statistiques.
+- Critere d'acceptation:
+  - un bouton ou lien "Statistiques" est visible dans Settings
+  - un clic ouvre l'ecran de statistiques
+  - la fermeture et le retour vers l'ecran precedent fonctionnent correctement
+
+#### F-03b Construire les donnees statistiques depuis l'historique
+- Priorite: P1
+- Estimation: S
+- Dependances: E-04, F-03
+- Description: transformer les seances terminees en donnees exploitables pour les graphes de progression et d'usage.
+- Critere d'acceptation:
+  - seules les seances terminees sont prises en compte
+  - les poids reels saisis dans les sets sont utilises
+  - les donnees sont regroupees par exercice ou machine selon le modele disponible
+  - les cas sans donnees sont geres sans erreur
+
+#### F-03c Afficher le graphe d'evolution des poids
+- Priorite: P1
+- Estimation: S
+- Dependances: F-03a, F-03b
+- Description: afficher un graphique chronologique montrant l'evolution des poids a partir de l'historique.
+- Critere d'acceptation:
+  - le graphe affiche une evolution lisible dans le temps
+  - les valeurs correspondent aux donnees historiques
+  - l'affichage reste lisible sur mobile et desktop
+
+#### F-03d Afficher le graphe des machines ou exercices les plus utilises
+- Priorite: P1
+- Estimation: S
+- Dependances: F-03a, F-03b
+- Description: afficher un graphique de frequence d'utilisation par machine ou exercice.
+- Critere d'acceptation:
+  - le classement ou l'histogramme affiche les usages correctement
+  - l'utilisateur identifie rapidement les machines les plus utilisees
+  - le composant reste robuste meme avec peu d'historique
+
+#### F-03e Ajouter le filtre par machine
+- Priorite: P1
+- Estimation: S
+- Dependances: F-03c, F-03d
+- Description: permettre a l'utilisateur de filtrer les statistiques par machine ou exercice et propager ce filtre a tous les graphes.
+- Critere d'acceptation:
+  - la liste des machines disponibles est proposee
+  - la selection d'un filtre met a jour tous les graphes
+  - un message explicite s'affiche si aucun resultat ne correspond
+
+#### F-03f Gerer les etats UX de la page Statistiques
+- Priorite: P1
+- Estimation: XS
+- Dependances: F-03c, F-03d, F-03e
+- Description: traiter les etats vides, sans resultat et les messages de feedback de la page Statistiques.
+- Critere d'acceptation:
+  - un etat vide est affiche si aucune seance terminee n'existe
+  - un etat "aucun resultat" est affiche si le filtre ne retourne rien
+  - les messages sont comprehensibles et coherents avec le reste de l'application
+
 ## EPIC G - Sync Google Drive (P2)
 
 ### G-01 OAuth Google
@@ -204,6 +279,46 @@
 - Description: merge par updatedAt et outil de resolution manuelle.
 - Critere d'acceptation:
   - aucun ecrasement silencieux de donnees
+
+## EPIC I - Auth Google + Sauvegarde Drive depuis Settings (P1)
+
+### I-01 Bouton "Se connecter avec Google" dans Settings
+- Priorite: P1
+- Estimation: S
+- Dependances: A-01
+- Description: ajouter dans l'ecran Settings un bouton de connexion Google via OAuth 2.0.
+- Critere d'acceptation:
+  - bouton visible et actionnable dans Settings
+  - popup Google fonctionnelle
+  - gestion des erreurs utilisateur (annulation/refus)
+
+### I-02 Recuperer nom et prenom utilisateur
+- Priorite: P1
+- Estimation: S
+- Dependances: I-01
+- Description: apres authentification, recuperer nom/prenom (et email optionnel) et l'afficher dans Settings.
+- Critere d'acceptation:
+  - prenom et nom affiches apres connexion
+  - etat "deconnecte" visible quand aucun compte n'est lie
+
+### I-03 Push templates/sessions vers Google Drive (appData)
+- Priorite: P1
+- Estimation: M
+- Dependances: I-01, I-02
+- Description: appeler l'API Google Drive pour sauvegarder les templates et les seances de l'utilisateur.
+- Critere d'acceptation:
+  - un fichier templates et un fichier sessions sont crees/mis a jour dans appDataFolder
+  - action manuelle "synchroniser" disponible dans Settings
+  - message de succes/erreur affiche a l'utilisateur
+
+### I-04 Base de synchro future (pull et conflits)
+- Priorite: P2
+- Estimation: M
+- Dependances: I-03
+- Description: poser les bases pour lecture Drive (pull) et detection de conflits par updatedAt.
+- Critere d'acceptation:
+  - format JSON versionne
+  - horodatage updatedAt present dans les payloads
 
 ## EPIC H - Ameliorations interface (P1)
 
