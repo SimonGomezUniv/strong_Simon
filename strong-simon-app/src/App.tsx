@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { DEFAULT_TEMPLATES } from './data/defaultTemplates'
 import { EXERCISES } from './data/exercises'
 import {
   type GoogleDriveBackupPayload,
@@ -64,9 +65,17 @@ type StatsOverview = {
   filteredUsage: StatsUsagePoint[]
   weightPoints: StatsWeightPoint[]
 }
+type HistorySessionDraft = {
+  sessionId: string
+  name: string
+  exercises: WorkoutSession['exercises']
+}
 type StatsWeightMode = 'max-per-session' | 'all-weights'
 const TEMPLATE_COLLAPSE_STORAGE_KEY = 'strong-simon-template-collapse-state'
 const APP_THEME_STORAGE_KEY = 'strong-simon-theme-v1'
+const TEMPLATES_STORAGE_KEY = 'strong-simon-templates-v1'
+const SESSION_HISTORY_STORAGE_KEY = 'strong-simon-session-history-v1'
+const ACTIVE_SESSION_STORAGE_KEY = 'strong-simon-active-session-v1'
 const APP_THEME_OPTIONS: Array<{ id: AppThemeId; label: string; description: string }> = [
   {
     id: 'classic',
@@ -136,6 +145,23 @@ function createTemplateExercise(exerciseId: string, orderIndex: number): Templat
       { setNumber: 3, targetReps: 8, targetWeight: 0, restSeconds: 90, phaseTag: 'working' },
     ],
   }
+}
+
+function cloneSessionExercises(exercises: WorkoutSession['exercises']): WorkoutSession['exercises'] {
+  return exercises.map((exercise) => ({
+    ...exercise,
+    sets: exercise.sets.map((set) => ({ ...set })),
+  }))
+}
+
+function cloneDefaultTemplates(): RoutineTemplate[] {
+  return DEFAULT_TEMPLATES.map((template) => ({
+    ...template,
+    exercises: template.exercises.map((exercise) => ({
+      ...exercise,
+      sets: exercise.sets.map((set) => ({ ...set })),
+    })),
+  }))
 }
 
 function createSessionFromTemplate(template: RoutineTemplate): WorkoutSession {
@@ -344,6 +370,25 @@ function startOfWeekMonday(date: Date) {
   const day = date.getDay()
   const diff = day === 0 ? -6 : 1 - day
   return startOfDay(addDays(date, diff))
+}
+
+function getOldestSessionStartedAt(sessions: WorkoutSession[]) {
+  let oldestTime = Number.POSITIVE_INFINITY
+  let oldestStartedAt: string | undefined
+
+  sessions.forEach((session) => {
+    const sessionTime = new Date(session.startedAt).getTime()
+    if (!Number.isFinite(sessionTime)) {
+      return
+    }
+
+    if (sessionTime < oldestTime) {
+      oldestTime = sessionTime
+      oldestStartedAt = session.startedAt
+    }
+  })
+
+  return oldestStartedAt
 }
 
 function getHistoryRangeBounds(range: HistoryBucketRange, now: Date, oldestStartedAt?: string) {
@@ -1139,7 +1184,7 @@ function App() {
   const initialHistoryBounds = getHistoryRangeBounds(
     '7d',
     new Date(),
-    initialHistory[initialHistory.length - 1]?.startedAt,
+    getOldestSessionStartedAt(initialHistory),
   )
 
   const [templates, setTemplates] = useState<RoutineTemplate[]>(() => initialTemplates)
@@ -1164,8 +1209,8 @@ function App() {
   const [historyDateStart, setHistoryDateStart] = useState(initialHistoryBounds.start)
   const [historyDateEnd, setHistoryDateEnd] = useState(initialHistoryBounds.end)
   const [statsRange, setStatsRange] = useState<HistoryRange>('1m')
-  const [statsDateStart, setStatsDateStart] = useState(() => getHistoryRangeBounds('1m', new Date(), initialHistory[initialHistory.length - 1]?.startedAt).start)
-  const [statsDateEnd, setStatsDateEnd] = useState(() => getHistoryRangeBounds('1m', new Date(), initialHistory[initialHistory.length - 1]?.startedAt).end)
+  const [statsDateStart, setStatsDateStart] = useState(() => getHistoryRangeBounds('1m', new Date(), getOldestSessionStartedAt(initialHistory)).start)
+  const [statsDateEnd, setStatsDateEnd] = useState(() => getHistoryRangeBounds('1m', new Date(), getOldestSessionStartedAt(initialHistory)).end)
   const [isHistoryDetailOpen, setIsHistoryDetailOpen] = useState(false)
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     initialHistory[0]?.id ?? null,
@@ -1202,6 +1247,7 @@ function App() {
   const [notificationPermission, setNotificationPermission] = useState(
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   )
+  const [historySessionDraft, setHistorySessionDraft] = useState<HistorySessionDraft | null>(null)
 
   const selectedIds = useMemo(() => new Set(selected.map((item) => item.exerciseId)), [selected])
   const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '').trim()
@@ -1223,7 +1269,7 @@ function App() {
 
   const historyOverview = useMemo(() => {
     const now = new Date()
-    const fallbackBounds = getHistoryRangeBounds('7d', now, sessionHistory[sessionHistory.length - 1]?.startedAt)
+    const fallbackBounds = getHistoryRangeBounds('7d', now, getOldestSessionStartedAt(sessionHistory))
     const parsedStart = parseDateInputValue(historyDateStart) ?? parseDateInputValue(fallbackBounds.start)
     const parsedEnd = parseDateInputValue(historyDateEnd) ?? parseDateInputValue(fallbackBounds.end)
     const tentativeStart = parsedStart ?? startOfDay(addDays(now, -6))
@@ -1350,8 +1396,11 @@ function App() {
     )
   }, [historyOverview.sessions, selectedSessionId])
 
+  const isEditingSelectedSession =
+    Boolean(selectedSession) && historySessionDraft?.sessionId === selectedSession?.id
+
   const statsOverview = useMemo<StatsOverview>(() => {
-    const fallbackBounds = getHistoryRangeBounds('1m', new Date(), sessionHistory[sessionHistory.length - 1]?.startedAt)
+    const fallbackBounds = getHistoryRangeBounds('1m', new Date(), getOldestSessionStartedAt(sessionHistory))
     const parsedStart = parseDateInputValue(statsDateStart) ?? parseDateInputValue(fallbackBounds.start)
     const parsedEnd = parseDateInputValue(statsDateEnd) ?? parseDateInputValue(fallbackBounds.end)
     const tentativeStart = parsedStart ?? startOfDay(addDays(new Date(), -29))
@@ -1596,7 +1645,7 @@ function App() {
     const nextBounds = getHistoryRangeBounds(
       historyRange,
       new Date(),
-      sessionHistory[sessionHistory.length - 1]?.startedAt,
+      getOldestSessionStartedAt(sessionHistory),
     )
 
     setHistoryDateStart(nextBounds.start)
@@ -1611,7 +1660,7 @@ function App() {
     const nextBounds = getHistoryRangeBounds(
       statsRange,
       new Date(),
-      sessionHistory[sessionHistory.length - 1]?.startedAt,
+      getOldestSessionStartedAt(sessionHistory),
     )
 
     setStatsDateStart(nextBounds.start)
@@ -1755,6 +1804,16 @@ function App() {
     return () => window.cancelAnimationFrame(animationFrame)
   }, [pendingNextValidationTarget, activeSession, currentExerciseIndex])
 
+  useEffect(() => {
+    if (!historySessionDraft) {
+      return
+    }
+
+    if (!sessionHistory.some((session) => session.id === historySessionDraft.sessionId)) {
+      setHistorySessionDraft(null)
+    }
+  }, [historySessionDraft, sessionHistory])
+
   function addExercise(exerciseId: string) {
     if (selectedIds.has(exerciseId)) {
       return
@@ -1772,7 +1831,7 @@ function App() {
   }
 
   function applyHistoryPreset(range: HistoryBucketRange) {
-    const nextBounds = getHistoryRangeBounds(range, new Date(), sessionHistory[sessionHistory.length - 1]?.startedAt)
+    const nextBounds = getHistoryRangeBounds(range, new Date(), getOldestSessionStartedAt(sessionHistory))
     setHistoryRange(range)
     setHistoryDateStart(nextBounds.start)
     setHistoryDateEnd(nextBounds.end)
@@ -1790,7 +1849,7 @@ function App() {
   }
 
   function applyStatsPreset(range: HistoryBucketRange) {
-    const nextBounds = getHistoryRangeBounds(range, new Date(), sessionHistory[sessionHistory.length - 1]?.startedAt)
+    const nextBounds = getHistoryRangeBounds(range, new Date(), getOldestSessionStartedAt(sessionHistory))
     setStatsRange(range)
     setStatsDateStart(nextBounds.start)
     setStatsDateEnd(nextBounds.end)
@@ -2243,9 +2302,258 @@ function App() {
   }
 
   function selectSession(sessionId: string) {
+    setHistorySessionDraft((previous) => (previous?.sessionId === sessionId ? previous : null))
     setSelectedSessionId(sessionId)
     setActiveView('history')
     setIsHistoryDetailOpen(true)
+  }
+
+  function startHistorySessionEdition(session: WorkoutSession) {
+    setHistorySessionDraft({
+      sessionId: session.id,
+      name: session.templateName,
+      exercises: cloneSessionExercises(session.exercises),
+    })
+  }
+
+  function cancelHistorySessionEdition() {
+    setHistorySessionDraft(null)
+  }
+
+  function updateHistoryDraftName(value: string) {
+    setHistorySessionDraft((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        name: value,
+      }
+    })
+  }
+
+  function updateHistoryDraftSet(
+    exerciseId: string,
+    setId: string,
+    field: SessionSetField,
+    value: number,
+  ) {
+    setHistorySessionDraft((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        exercises: previous.exercises.map((exercise) => {
+          if (exercise.id !== exerciseId) {
+            return exercise
+          }
+
+          return {
+            ...exercise,
+            sets: exercise.sets.map((set) => {
+              if (set.id !== setId) {
+                return set
+              }
+
+              return {
+                ...set,
+                [field]:
+                  field === 'actualReps'
+                    ? Math.max(0, Math.round(Number.isNaN(value) ? 0 : value))
+                    : Math.max(0, Number.isNaN(value) ? 0 : value),
+              }
+            }),
+          }
+        }),
+      }
+    })
+  }
+
+  function addHistoryDraftSet(exerciseId: string) {
+    setHistorySessionDraft((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        exercises: previous.exercises.map((exercise) => {
+          if (exercise.id !== exerciseId) {
+            return exercise
+          }
+
+          const lastSet = exercise.sets[exercise.sets.length - 1]
+          return {
+            ...exercise,
+            sets: [
+              ...exercise.sets,
+              {
+                ...createFollowupSessionSet(lastSet),
+                setNumber: exercise.sets.length + 1,
+              },
+            ],
+          }
+        }),
+      }
+    })
+  }
+
+  function removeHistoryDraftSet(exerciseId: string, setId: string) {
+    setHistorySessionDraft((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        exercises: previous.exercises.map((exercise) => {
+          if (exercise.id !== exerciseId) {
+            return exercise
+          }
+
+          const nextSets = exercise.sets
+            .filter((set) => set.id !== setId)
+            .map((set, index) => ({
+              ...set,
+              setNumber: index + 1,
+            }))
+
+          return {
+            ...exercise,
+            sets: nextSets,
+          }
+        }),
+      }
+    })
+  }
+
+  function saveHistorySessionEdition() {
+    if (!historySessionDraft) {
+      return
+    }
+
+    const nextName = historySessionDraft.name.trim()
+
+    if (!nextName) {
+      showNotice('Le nom de la seance est obligatoire.')
+      return
+    }
+
+    const normalizedExercises = historySessionDraft.exercises
+      .map((exercise) => ({
+        ...exercise,
+        sets: exercise.sets.map((set, index) => ({
+          ...set,
+          setNumber: index + 1,
+          actualReps: Math.max(0, Math.round(set.actualReps)),
+          actualWeight: Math.max(0, set.actualWeight),
+        })),
+      }))
+      .filter((exercise) => exercise.sets.length > 0)
+
+    if (normalizedExercises.length === 0) {
+      showNotice('Ajoute au moins une serie pour enregistrer la seance.')
+      return
+    }
+
+    setSessionHistory((previous) =>
+      previous.map((session) => {
+        if (session.id !== historySessionDraft.sessionId) {
+          return session
+        }
+
+        return {
+          ...session,
+          templateName: nextName,
+          exercises: normalizedExercises,
+        }
+      }),
+    )
+
+    setHistorySessionDraft(null)
+    showNotice('Seance historique mise a jour.')
+  }
+
+  function reloadDefaultTemplates(mode: 'replace' | 'merge') {
+    const defaultTemplates = cloneDefaultTemplates()
+
+    if (mode === 'replace') {
+      const shouldContinue = window.confirm(
+        'Remplacer les templates va ecraser tes templates actuels. Continuer ?',
+      )
+
+      if (!shouldContinue) {
+        return
+      }
+
+      setTemplates(defaultTemplates)
+      showNotice(`${defaultTemplates.length} templates par defaut recharges (remplacement).`)
+      return
+    }
+
+    let addedCount = 0
+    setTemplates((previous) => {
+      const existingIds = new Set(previous.map((template) => template.id))
+      const missingDefaults = defaultTemplates.filter((template) => !existingIds.has(template.id))
+      addedCount = missingDefaults.length
+      return [...previous, ...missingDefaults]
+    })
+
+    if (addedCount === 0) {
+      showNotice('Aucun template par defaut ajoute: tous les IDs existent deja.')
+      return
+    }
+
+    showNotice(`${addedCount} template(s) par defaut ajoute(s) en fusion.`)
+  }
+
+  function purgeAllLocalData() {
+    const shouldContinue = window.confirm(
+      'Cette action supprime toutes les donnees locales (templates, seances, preferences). Continuer ?',
+    )
+
+    if (!shouldContinue) {
+      return
+    }
+
+    if (typeof window !== 'undefined') {
+      ;[
+        TEMPLATES_STORAGE_KEY,
+        SESSION_HISTORY_STORAGE_KEY,
+        ACTIVE_SESSION_STORAGE_KEY,
+        TEMPLATE_COLLAPSE_STORAGE_KEY,
+        APP_THEME_STORAGE_KEY,
+      ].forEach((storageKey) => window.localStorage.removeItem(storageKey))
+    }
+
+    setTemplates([])
+    setSessionHistory([])
+    setActiveSession(null)
+    setSelectedSessionId(null)
+    setHistorySessionDraft(null)
+    setActiveSetByExerciseId({})
+    setCurrentExerciseIndex(0)
+    setIsHistoryDetailOpen(false)
+    setIsTemplateEditorOpen(false)
+    setIsExercisePickerOpen(false)
+    setIsFinishRecapOpen(false)
+    setIsResting(false)
+    setRestRemaining(0)
+    setIsRestDonePopupOpen(false)
+    setIsWatchStartPopupOpen(false)
+    setStatsMachineFilter('all')
+    setStatsWeightMode('max-per-session')
+    setGoogleDrivePreview(null)
+    setGoogleAccessToken('')
+    setGoogleProfile(null)
+    setAppTheme('classic')
+    setActiveView('templates')
+    setIsSettingsOpen(false)
+
+    showNotice('Toutes les donnees locales ont ete supprimees.')
   }
 
   async function requestNotifications() {
@@ -2743,6 +3051,43 @@ function App() {
                   }}
                 />
               </label>
+            </div>
+
+            <div className="settings-block">
+              <strong>Templates par defaut</strong>
+              <p className="panel-intro">
+                Recharge les templates seed de l'application en mode fusion ou remplacement.
+              </p>
+              <div className="settings-actions-row">
+                <button
+                  type="button"
+                  className="button-compact"
+                  onClick={() => reloadDefaultTemplates('merge')}
+                >
+                  Recharger templates par defaut (fusion)
+                </button>
+                <button
+                  type="button"
+                  className="button-compact button-compact--warning"
+                  onClick={() => reloadDefaultTemplates('replace')}
+                >
+                  Recharger templates par defaut (remplacer)
+                </button>
+              </div>
+            </div>
+
+            <div className="settings-block">
+              <strong>Donnees locales</strong>
+              <p className="panel-intro">
+                Supprime tous les templates, seances et preferences stockes localement sur cet appareil.
+              </p>
+              <button
+                type="button"
+                className="button-compact button-compact--danger"
+                onClick={purgeAllLocalData}
+              >
+                Supprimer toutes les donnees locales
+              </button>
             </div>
 
             <div className="settings-block">
@@ -3943,7 +4288,7 @@ function App() {
               <section className="history-detail-popup" onClick={(event) => event.stopPropagation()}>
                 <div className="card-head section-head section-head--tight popup-head popup-head--flush">
                   <div>
-                    <h3>{selectedSession.templateName}</h3>
+                    <h3>{isEditingSelectedSession ? historySessionDraft?.name ?? selectedSession.templateName : selectedSession.templateName}</h3>
                     <p>
                       {new Date(selectedSession.startedAt).toLocaleString('fr-FR')}
                       {selectedSession.endedAt
@@ -3962,8 +4307,40 @@ function App() {
                   </button>
                 </div>
 
+                <div className="history-detail-actions">
+                  {isEditingSelectedSession ? (
+                    <>
+                      <button type="button" className="button-compact" onClick={saveHistorySessionEdition}>
+                        Enregistrer les modifications
+                      </button>
+                      <button type="button" className="button-compact" onClick={cancelHistorySessionEdition}>
+                        Annuler l'edition
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button-compact"
+                      onClick={() => startHistorySessionEdition(selectedSession)}
+                    >
+                      Editer cette seance
+                    </button>
+                  )}
+                </div>
+
+                {isEditingSelectedSession && (
+                  <label className="history-session-name-field">
+                    Nom de la seance
+                    <input
+                      value={historySessionDraft?.name ?? ''}
+                      onChange={(event) => updateHistoryDraftName(event.target.value)}
+                      placeholder="Nom de la seance"
+                    />
+                  </label>
+                )}
+
                 <div className="detail-exercises">
-                  {selectedSession.exercises.map((exercise) => {
+                  {(isEditingSelectedSession ? historySessionDraft?.exercises ?? [] : selectedSession.exercises).map((exercise) => {
                     const exerciseInfo = EXERCISES.find((entry) => entry.id === exercise.exerciseId)
 
                     return (
@@ -3973,26 +4350,85 @@ function App() {
                             <strong>{exerciseInfo?.name ?? exercise.exerciseId}</strong>
                             <p>{exerciseInfo?.category ?? 'General'}</p>
                           </div>
+                          {isEditingSelectedSession && (
+                            <button
+                              type="button"
+                              className="button-compact"
+                              onClick={() => addHistoryDraftSet(exercise.id)}
+                            >
+                              + Ajouter une serie
+                            </button>
+                          )}
                         </div>
                         <div className="detail-sets">
-                          {exercise.sets.map((set) => (
-                            <div className="detail-set" key={set.id}>
-                              <span>Set {set.setNumber}</span>
-                              <span>{set.actualReps} reps</span>
-                              <span>{set.actualWeight} kg</span>
-                              <span>{set.restSeconds}s</span>
-                              <span>
-                                <span className={`tag-chip tag-chip--${set.phaseTag ?? 'working'}`}>
-                                  {set.phaseTag ?? 'working'}
-                                </span>
-                                {set.effortTag ? (
-                                  <span className={`tag-chip tag-chip--${set.effortTag}`}>
-                                    {set.effortTag}
+                          {exercise.sets.map((set) => {
+                            if (!isEditingSelectedSession) {
+                              return (
+                                <div className="detail-set" key={set.id}>
+                                  <span>Set {set.setNumber}</span>
+                                  <span>{set.actualReps} reps</span>
+                                  <span>{set.actualWeight} kg</span>
+                                  <span>{set.restSeconds}s</span>
+                                  <span>
+                                    <span className={`tag-chip tag-chip--${set.phaseTag ?? 'working'}`}>
+                                      {set.phaseTag ?? 'working'}
+                                    </span>
+                                    {set.effortTag ? (
+                                      <span className={`tag-chip tag-chip--${set.effortTag}`}>
+                                        {set.effortTag}
+                                      </span>
+                                    ) : null}
                                   </span>
-                                ) : null}
-                              </span>
-                            </div>
-                          ))}
+                                </div>
+                              )
+                            }
+
+                            return (
+                              <div className="detail-set detail-set--editing" key={set.id}>
+                                <span>Set {set.setNumber}</span>
+                                <label>
+                                  Reps
+                                  <input
+                                    type="number"
+                                    value={set.actualReps}
+                                    onChange={(event) =>
+                                      updateHistoryDraftSet(
+                                        exercise.id,
+                                        set.id,
+                                        'actualReps',
+                                        Number(event.target.value),
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  Poids (kg)
+                                  <input
+                                    type="number"
+                                    step="0.5"
+                                    value={set.actualWeight}
+                                    onChange={(event) =>
+                                      updateHistoryDraftSet(
+                                        exercise.id,
+                                        set.id,
+                                        'actualWeight',
+                                        Number(event.target.value),
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <span>{set.restSeconds}s repos</span>
+                                <button
+                                  type="button"
+                                  className="button-compact button-compact--danger"
+                                  onClick={() => removeHistoryDraftSet(exercise.id, set.id)}
+                                  disabled={exercise.sets.length <= 1}
+                                >
+                                  Supprimer la serie
+                                </button>
+                              </div>
+                            )
+                          })}
                         </div>
                       </article>
                     )

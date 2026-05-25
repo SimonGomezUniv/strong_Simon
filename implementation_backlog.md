@@ -413,6 +413,43 @@
   - interactions principales visibles en un coup d'oeil
   - aucun decalage de layout
 
+## EPIC J - Maintenance des donnees locales (P1)
+
+### J-01 Purge complete des donnees locales
+- Priorite: P1
+- Estimation: S
+- Dependances: B-02, E-04
+- Description: ajouter une action explicite permettant de supprimer toutes les donnees stockees en local (templates, seances, preferences locales) avec confirmation utilisateur.
+- Critere d'acceptation:
+  - une action "Supprimer toutes les donnees locales" est visible dans Settings
+  - une confirmation explicite est requise avant execution
+  - apres confirmation, templates, historique de seances et etat de seance en cours sont vides
+  - l'application revient a un etat initial coherent sans erreur
+
+### J-02 Edition d'une seance passee
+- Priorite: P1
+- Estimation: L
+- Dependances: E-04, H-05
+- Description: permettre l'edition d'une seance historique: renommage de la seance, edition des sets existants (repetitions et poids), suppression et ajout de serie.
+- Critere d'acceptation:
+  - depuis l'historique, l'utilisateur peut ouvrir un mode edition pour une seance terminee
+  - le nom de la seance est modifiable et persiste
+  - pour chaque set, reps et poids sont modifiables avec validation minimale
+  - l'utilisateur peut supprimer une serie et en ajouter une nouvelle
+  - les modifications sont sauvegardees localement et visibles dans les statistiques/export
+
+### J-03 Recharger les templates par defaut
+- Priorite: P1
+- Estimation: S
+- Dependances: D-01
+- Description: ajouter une action permettant de recharger les templates par defaut fournis par l'application.
+- Critere d'acceptation:
+  - une action "Recharger les templates par defaut" est disponible dans Settings
+  - l'action propose les modes "remplacer" et "fusionner"
+  - en mode remplacer, les templates existants sont remplaces par les templates par defaut
+  - en mode fusionner, seuls les templates manquants sont ajoutes sans dupliquer les ids existants
+  - un message de resultat indique le nombre de templates ajoutes/remplaces
+
 ## Parcours de recette MVP
 - creer un template depuis catalogue
 - lancer une seance
@@ -427,5 +464,6 @@
 3. D-01, D-02, C-02, C-03
 4. E-01, D-03, E-02, E-03, E-04
 5. H-01, H-02, H-03, H-04, H-05, H-06
-6. F-01, F-02
-7. G-01, G-02, G-03
+6. J-01, J-02, J-03
+7. F-01, F-02
+8. G-01, G-02, G-03
