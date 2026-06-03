@@ -47,10 +47,48 @@ type StatsWeightPoint = {
 type StatsUsagePoint = {
   machineId: string
   label: string
+  imageUrl?: string
   sessions: number
   sets: number
   maxWeight: number
 }
+
+type StatsHeatmapDay = {
+  date: string
+  inRange: boolean
+  sessions: number
+  sets: number
+  volume: number
+}
+
+type StatsWeeklyScore = {
+  current: number
+  previous: number
+  delta: number
+  frequencyScore: number
+  volumeScore: number
+  progressionScore: number
+  streakDays: number
+}
+
+type StatsPersonalRecordPoint = {
+  key: string
+  date: string
+  machineId: string
+  machineLabel: string
+  weight: number
+}
+
+type StatsStagnationPoint = {
+  machineId: string
+  machineLabel: string
+  trend: 'progressing' | 'stagnating'
+  recentMax: number
+  previousMax: number
+  recommendation: string
+}
+
+type StatsHeatmapMetric = 'sessions' | 'sets' | 'volume'
 
 type StatsOverview = {
   hasCompletedSessions: boolean
@@ -64,6 +102,11 @@ type StatsOverview = {
   usage: StatsUsagePoint[]
   filteredUsage: StatsUsagePoint[]
   weightPoints: StatsWeightPoint[]
+  heatmapDaysByWeek: StatsHeatmapDay[][]
+  heatmapPeak: number
+  weeklyScore: StatsWeeklyScore
+  personalRecords: StatsPersonalRecordPoint[]
+  stagnationPoints: StatsStagnationPoint[]
 }
 type HistorySessionDraft = {
   sessionId: string
@@ -253,6 +296,14 @@ function formatWeightValue(value: number) {
     minimumFractionDigits: Number.isInteger(value) ? 0 : 1,
     maximumFractionDigits: 1,
   })} kg`
+}
+
+function formatVolumeValue(value: number) {
+  return `${Math.round(value).toLocaleString('fr-FR')} vol`
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
 }
 
 function buildLinePath(points: StatsWeightPoint[], width: number, height: number) {
@@ -1233,6 +1284,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [appTheme, setAppTheme] = useState<AppThemeId>(() => loadAppTheme())
   const [statsWeightMode, setStatsWeightMode] = useState<StatsWeightMode>('max-per-session')
+  const [statsHeatmapMetric, setStatsHeatmapMetric] = useState<StatsHeatmapMetric>('sessions')
   const [statsMachineFilter, setStatsMachineFilter] = useState('all')
   const [googleProfile, setGoogleProfile] = useState<GoogleIdentityProfile | null>(null)
   const [googleAccessToken, setGoogleAccessToken] = useState('')
@@ -1458,9 +1510,14 @@ function App() {
         const currentUsage = usageMap.get(machineId) ?? {
           machineId,
           label: machineLabel,
+          imageUrl: exerciseInfo?.imageUrl,
           sessions: 0,
           sets: 0,
           maxWeight: 0,
+        }
+
+        if (!currentUsage.imageUrl && exerciseInfo?.imageUrl) {
+          currentUsage.imageUrl = exerciseInfo.imageUrl
         }
 
         currentUsage.sets += countedSets
@@ -1498,6 +1555,293 @@ function App() {
       activeMachineId === 'all'
         ? 'Toutes les machines'
         : machineOptions.find((option) => option.id === activeMachineId)?.label ?? 'Machine inconnue'
+
+    const heatmapDayMap = new Map<string, { sessions: number; sets: number; volume: number }>()
+
+    completedSessions.forEach((session) => {
+      const dayKey = formatDateInputValue(startOfDay(new Date(session.startedAt)))
+      let sessionSets = 0
+      let sessionVolume = 0
+
+      session.exercises.forEach((exercise) => {
+        const machineId = resolveExerciseId(exercise.exerciseId)
+
+        if (activeMachineId !== 'all' && machineId !== activeMachineId) {
+          return
+        }
+
+        exercise.sets.forEach((set) => {
+          if (set.actualWeight <= 0) {
+            return
+          }
+
+          sessionSets += 1
+          sessionVolume += set.actualWeight * Math.max(0, set.actualReps)
+        })
+      })
+
+      if (sessionSets === 0) {
+        return
+      }
+
+      const current = heatmapDayMap.get(dayKey) ?? { sessions: 0, sets: 0, volume: 0 }
+      current.sessions += 1
+      current.sets += sessionSets
+      current.volume += sessionVolume
+      heatmapDayMap.set(dayKey, current)
+    })
+
+    const heatmapStart = startOfWeekMonday(rangeStart)
+    const heatmapEnd = addDays(startOfWeekMonday(rangeEnd), 6)
+    const heatmapDaysByWeek: StatsHeatmapDay[][] = []
+
+    for (
+      let weekStart = heatmapStart;
+      weekStart.getTime() <= heatmapEnd.getTime();
+      weekStart = addDays(weekStart, 7)
+    ) {
+      const week: StatsHeatmapDay[] = []
+
+      for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+        const dayDate = addDays(weekStart, dayIndex)
+        const dayKey = formatDateInputValue(dayDate)
+        const dayStats = heatmapDayMap.get(dayKey)
+        const inRange = dayDate.getTime() >= rangeStart.getTime() && dayDate.getTime() <= rangeEnd.getTime()
+
+        week.push({
+          date: dayKey,
+          inRange,
+          sessions: dayStats?.sessions ?? 0,
+          sets: dayStats?.sets ?? 0,
+          volume: dayStats?.volume ?? 0,
+        })
+      }
+
+      heatmapDaysByWeek.push(week)
+    }
+
+    const getHeatmapMetricValue = (day: StatsHeatmapDay) => {
+      if (statsHeatmapMetric === 'sets') {
+        return day.sets
+      }
+
+      if (statsHeatmapMetric === 'volume') {
+        return day.volume
+      }
+
+      return day.sessions
+    }
+
+    const heatmapPeak = Math.max(
+      1,
+      ...heatmapDaysByWeek.flatMap((week) => week.map((day) => (day.inRange ? getHeatmapMetricValue(day) : 0))),
+    )
+
+    const sessionSnapshots = completedSessions.map((session) => {
+      const weightedSets: Array<{
+        machineId: string
+        machineLabel: string
+        weight: number
+        reps: number
+      }> = []
+
+      session.exercises.forEach((exercise) => {
+        const machineId = resolveExerciseId(exercise.exerciseId)
+
+        if (activeMachineId !== 'all' && machineId !== activeMachineId) {
+          return
+        }
+
+        const machineLabel = exerciseById.get(machineId)?.name ?? 'Machine inconnue'
+        exercise.sets.forEach((set) => {
+          if (set.actualWeight <= 0) {
+            return
+          }
+
+          weightedSets.push({
+            machineId,
+            machineLabel,
+            weight: set.actualWeight,
+            reps: Math.max(0, set.actualReps),
+          })
+        })
+      })
+
+      return {
+        session,
+        weightedSets,
+        setCount: weightedSets.length,
+        maxWeight: weightedSets.length > 0 ? Math.max(...weightedSets.map((set) => set.weight)) : 0,
+        volume: weightedSets.reduce((sum, set) => sum + set.weight * set.reps, 0),
+      }
+    })
+
+    const collectWindowMetrics = (windowStart: Date, windowEndExclusive: Date) => {
+      const matches = sessionSnapshots.filter(({ session, setCount }) => {
+        if (setCount === 0) {
+          return false
+        }
+
+        const sessionDate = new Date(session.startedAt)
+        return sessionDate >= windowStart && sessionDate < windowEndExclusive
+      })
+
+      return {
+        sessions: matches.length,
+        sets: matches.reduce((sum, point) => sum + point.setCount, 0),
+        volume: matches.reduce((sum, point) => sum + point.volume, 0),
+        maxWeight: matches.length > 0 ? Math.max(...matches.map((point) => point.maxWeight)) : 0,
+      }
+    }
+
+    const currentWindowEndExclusive = addDays(rangeEnd, 1)
+    const currentWindowStart = addDays(currentWindowEndExclusive, -7)
+    const previousWindowEndExclusive = currentWindowStart
+    const previousWindowStart = addDays(previousWindowEndExclusive, -7)
+    const olderWindowEndExclusive = previousWindowStart
+    const olderWindowStart = addDays(olderWindowEndExclusive, -7)
+
+    const currentWindowMetrics = collectWindowMetrics(currentWindowStart, currentWindowEndExclusive)
+    const previousWindowMetrics = collectWindowMetrics(previousWindowStart, previousWindowEndExclusive)
+    const olderWindowMetrics = collectWindowMetrics(olderWindowStart, olderWindowEndExclusive)
+
+    const getCompositeScore = (
+      current: { sessions: number; volume: number; maxWeight: number },
+      baseline: { sessions: number; volume: number; maxWeight: number },
+    ) => {
+      const frequencyScore = clamp(current.sessions * 20, 0, 100)
+      const volumeScore =
+        baseline.volume > 0
+          ? clamp(50 + ((current.volume - baseline.volume) / baseline.volume) * 50, 0, 100)
+          : current.volume > 0
+            ? 70
+            : 0
+      const progressionScore =
+        baseline.maxWeight > 0
+          ? clamp(50 + ((current.maxWeight - baseline.maxWeight) / baseline.maxWeight) * 100, 0, 100)
+          : current.maxWeight > 0
+            ? 70
+            : 0
+
+      return {
+        score: Math.round(frequencyScore * 0.4 + volumeScore * 0.35 + progressionScore * 0.25),
+        frequencyScore: Math.round(frequencyScore),
+        volumeScore: Math.round(volumeScore),
+        progressionScore: Math.round(progressionScore),
+      }
+    }
+
+    const currentComposite = getCompositeScore(currentWindowMetrics, previousWindowMetrics)
+    const previousComposite = getCompositeScore(previousWindowMetrics, olderWindowMetrics)
+
+    let streakDays = 0
+    for (
+      let cursor = rangeEnd;
+      cursor.getTime() >= rangeStart.getTime();
+      cursor = addDays(cursor, -1)
+    ) {
+      const key = formatDateInputValue(cursor)
+      const daySessions = heatmapDayMap.get(key)?.sessions ?? 0
+      if (daySessions <= 0) {
+        break
+      }
+      streakDays += 1
+    }
+
+    const weeklyScore: StatsWeeklyScore = {
+      current: currentComposite.score,
+      previous: previousComposite.score,
+      delta: currentComposite.score - previousComposite.score,
+      frequencyScore: currentComposite.frequencyScore,
+      volumeScore: currentComposite.volumeScore,
+      progressionScore: currentComposite.progressionScore,
+      streakDays,
+    }
+
+    const personalRecordsRaw: StatsPersonalRecordPoint[] = []
+    const machineBestWeight = new Map<string, number>()
+
+    sessionSnapshots.forEach(({ session, weightedSets }) => {
+      weightedSets.forEach((set, index) => {
+        const previousBest = machineBestWeight.get(set.machineId) ?? 0
+        if (set.weight > previousBest) {
+          machineBestWeight.set(set.machineId, set.weight)
+          personalRecordsRaw.push({
+            key: `${session.id}-${set.machineId}-${index}`,
+            date: session.startedAt,
+            machineId: set.machineId,
+            machineLabel: set.machineLabel,
+            weight: set.weight,
+          })
+        }
+      })
+    })
+
+    const personalRecords = personalRecordsRaw.slice(-8).reverse()
+
+    const machineTimeline = new Map<string, Array<{ date: string; maxWeight: number; machineLabel: string }>>()
+    sessionSnapshots.forEach(({ session, weightedSets }) => {
+      const sessionMaxByMachine = new Map<string, { maxWeight: number; machineLabel: string }>()
+
+      weightedSets.forEach((set) => {
+        const current = sessionMaxByMachine.get(set.machineId)
+        if (!current || set.weight > current.maxWeight) {
+          sessionMaxByMachine.set(set.machineId, {
+            maxWeight: set.weight,
+            machineLabel: set.machineLabel,
+          })
+        }
+      })
+
+      sessionMaxByMachine.forEach((point, machineId) => {
+        const timeline = machineTimeline.get(machineId) ?? []
+        timeline.push({
+          date: session.startedAt,
+          maxWeight: point.maxWeight,
+          machineLabel: point.machineLabel,
+        })
+        machineTimeline.set(machineId, timeline)
+      })
+    })
+
+    const stagnationPoints = Array.from(machineTimeline.entries())
+      .map(([machineId, timeline]) => {
+        if (timeline.length < 4) {
+          return null
+        }
+
+        const recentWindow = timeline.slice(-4)
+        const previousWindow = timeline.slice(Math.max(0, timeline.length - 8), Math.max(0, timeline.length - 4))
+
+        if (previousWindow.length === 0) {
+          return null
+        }
+
+        const recentMax = Math.max(...recentWindow.map((point) => point.maxWeight))
+        const previousMax = Math.max(...previousWindow.map((point) => point.maxWeight))
+        const trend: StatsStagnationPoint['trend'] = recentMax >= previousMax * 1.02 ? 'progressing' : 'stagnating'
+
+        return {
+          machineId,
+          machineLabel: timeline[timeline.length - 1]?.machineLabel ?? 'Machine inconnue',
+          trend,
+          recentMax,
+          previousMax,
+          recommendation:
+            trend === 'stagnating'
+              ? 'Essaie +1 rep sur les 2 premieres series ou un deload court avant de remonter.'
+              : 'Continue le cycle actuel, progression reguliere detectee.',
+        } satisfies StatsStagnationPoint
+      })
+      .filter((point): point is StatsStagnationPoint => point !== null)
+      .sort((left, right) => {
+        if (left.trend !== right.trend) {
+          return left.trend === 'stagnating' ? -1 : 1
+        }
+
+        return right.recentMax - left.recentMax
+      })
+      .slice(0, 4)
 
     const weightPoints = completedSessions.flatMap((session) => {
       if (statsWeightMode === 'max-per-session') {
@@ -1579,8 +1923,20 @@ function App() {
       usage,
       filteredUsage,
       weightPoints,
+      heatmapDaysByWeek,
+      heatmapPeak,
+      weeklyScore,
+      personalRecords,
+      stagnationPoints,
     }
-  }, [sessionHistory, statsMachineFilter, statsDateEnd, statsDateStart, statsWeightMode])
+  }, [
+    sessionHistory,
+    statsMachineFilter,
+    statsDateEnd,
+    statsDateStart,
+    statsWeightMode,
+    statsHeatmapMetric,
+  ])
 
   const currentExercise = activeSession?.exercises[currentExerciseIndex] ?? null
   const currentExerciseInfo = currentExercise
@@ -2563,6 +2919,7 @@ function App() {
     setIsWatchStartPopupOpen(false)
     setStatsMachineFilter('all')
     setStatsWeightMode('max-per-session')
+    setStatsHeatmapMetric('sessions')
     setGoogleDrivePreview(null)
     setGoogleAccessToken('')
     setGoogleProfile(null)
@@ -3377,6 +3734,18 @@ function App() {
               </select>
             </label>
 
+            <label className="stats-filter-field">
+              <span>Heatmap</span>
+              <select
+                value={statsHeatmapMetric}
+                onChange={(event) => setStatsHeatmapMetric(event.target.value as StatsHeatmapMetric)}
+              >
+                <option value="sessions">Seances</option>
+                <option value="sets">Sets avec poids</option>
+                <option value="volume">Volume</option>
+              </select>
+            </label>
+
             <div className="stats-date-controls">
               <label className="history-date-field">
                 <span>Du</span>
@@ -3436,6 +3805,88 @@ function App() {
                 </article>
               </div>
 
+              <div className="stats-insights-grid">
+                <article className="stats-chart-card stats-insight-card">
+                  <div className="card-head section-head section-head--tight">
+                    <div>
+                      <h3>Score progression hebdo</h3>
+                      <p className="panel-intro">Frequence, volume et progression de charge.</p>
+                    </div>
+                  </div>
+                  <div className="stats-score-main">
+                    <strong>{statsOverview.weeklyScore.current}/100</strong>
+                    <span
+                      className={
+                        statsOverview.weeklyScore.delta >= 0 ? 'stats-score-delta is-up' : 'stats-score-delta is-down'
+                      }
+                    >
+                      {statsOverview.weeklyScore.delta >= 0 ? '+' : ''}
+                      {statsOverview.weeklyScore.delta} vs semaine precedente
+                    </span>
+                  </div>
+                  <div className="stats-score-breakdown">
+                    <p>Frequence: {statsOverview.weeklyScore.frequencyScore}</p>
+                    <p>Volume: {statsOverview.weeklyScore.volumeScore}</p>
+                    <p>Progression charge: {statsOverview.weeklyScore.progressionScore}</p>
+                    <p>Streak actuel: {statsOverview.weeklyScore.streakDays} jour(s)</p>
+                  </div>
+                </article>
+
+                <article className="stats-chart-card stats-insight-card">
+                  <div className="card-head section-head section-head--tight">
+                    <div>
+                      <h3>Derniers records</h3>
+                      <p className="panel-intro">Records personnels detectes sur la periode.</p>
+                    </div>
+                    <span className="history-total-chip">{statsOverview.personalRecords.length}</span>
+                  </div>
+
+                  {statsOverview.personalRecords.length === 0 ? (
+                    <p className="stats-chart-empty">Pas encore de nouveau record sur cette selection.</p>
+                  ) : (
+                    <div className="stats-pr-list">
+                      {statsOverview.personalRecords.map((record) => (
+                        <div className="stats-pr-item" key={record.key}>
+                          <strong>{record.machineLabel}</strong>
+                          <span>{formatWeightValue(record.weight)}</span>
+                          <small>{formatStatDateLabel(record.date)}</small>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+
+                <article className="stats-chart-card stats-insight-card">
+                  <div className="card-head section-head section-head--tight">
+                    <div>
+                      <h3>Stagnation et actions</h3>
+                      <p className="panel-intro">Detection des exercices a relancer.</p>
+                    </div>
+                  </div>
+
+                  {statsOverview.stagnationPoints.length === 0 ? (
+                    <p className="stats-chart-empty">Pas assez d historique pour detecter une stagnation.</p>
+                  ) : (
+                    <div className="stats-stagnation-list">
+                      {statsOverview.stagnationPoints.map((point) => (
+                        <div className="stats-stagnation-item" key={point.machineId}>
+                          <div className="stats-stagnation-item__head">
+                            <strong>{point.machineLabel}</strong>
+                            <span className={point.trend === 'stagnating' ? 'is-stagnating' : 'is-progressing'}>
+                              {point.trend === 'stagnating' ? 'Stagnation' : 'Progression'}
+                            </span>
+                          </div>
+                          <p>
+                            Recent: {formatWeightValue(point.recentMax)} | Avant: {formatWeightValue(point.previousMax)}
+                          </p>
+                          <small>{point.recommendation}</small>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              </div>
+
               <div className="stats-main-layout">
                 <article className="stats-chart-card stats-chart-card--usage">
                   <div className="card-head section-head section-head--tight">
@@ -3465,12 +3916,23 @@ function App() {
                           aria-pressed={isActive}
                           title={isActive ? 'Retirer le filtre machine' : `Filtrer sur ${entry.label}`}
                         >
-                          <div className="stats-usage-row__head">
-                            <strong>{entry.label}</strong>
-                            <span>{entry.sessions} seances</span>
-                          </div>
-                          <div className="stats-usage-row__track">
-                            <div className="stats-usage-row__fill" style={{ width: `${width}%` }} />
+                          <div className="stats-usage-row__main">
+                            <div className="stats-usage-row__thumb" aria-hidden="true">
+                              {entry.imageUrl ? (
+                                <img src={resolvePublicAssetUrl(entry.imageUrl)} alt="" loading="lazy" />
+                              ) : (
+                                <span>?</span>
+                              )}
+                            </div>
+                            <div className="stats-usage-row__content">
+                              <div className="stats-usage-row__head">
+                                <strong>{entry.label}</strong>
+                                <span>{entry.sessions} seances</span>
+                              </div>
+                              <div className="stats-usage-row__track">
+                                <div className="stats-usage-row__fill" style={{ width: `${width}%` }} />
+                              </div>
+                            </div>
                           </div>
                           <div className="stats-usage-row__meta">
                             <span>{entry.sets} sets avec poids</span>
@@ -3537,6 +3999,91 @@ function App() {
                   )}
                 </article>
               </div>
+
+              <article className="stats-chart-card stats-chart-card--heatmap stats-chart-card--heatmap-compact">
+                <div className="card-head section-head section-head--tight">
+                  <div>
+                    <h3>Heatmap des seances</h3>
+                    <p className="panel-intro">
+                      Intensite: {statsHeatmapMetric === 'sessions' ? 'seances' : statsHeatmapMetric === 'sets' ? 'sets avec poids' : 'volume'}. Clique sur un jour pour filtrer cette date.
+                    </p>
+                  </div>
+                  <span className="history-total-chip">{statsOverview.heatmapDaysByWeek.length} semaines</span>
+                </div>
+
+                <div className="stats-heatmap__head" aria-hidden="true">
+                  <span className="stats-heatmap__week-label">Sem.</span>
+                  {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((label, index) => (
+                    <span key={`${label}-${index}`}>{label}</span>
+                  ))}
+                </div>
+
+                <div className="stats-heatmap" aria-label="Heatmap des seances">
+                  {statsOverview.heatmapDaysByWeek.map((week, weekIndex) => {
+                    const weekStartLabel = formatHistoryDateValue(week[0]?.date ?? '')
+                    const weekEndLabel = formatHistoryDateValue(week[6]?.date ?? '')
+
+                    return (
+                      <div className="stats-heatmap__week" key={`week-${weekIndex}`}>
+                        <span className="stats-heatmap__week-label">{`${weekStartLabel} - ${weekEndLabel}`}</span>
+                        {week.map((day) => {
+                          const metricValue =
+                            statsHeatmapMetric === 'sessions'
+                              ? day.sessions
+                              : statsHeatmapMetric === 'sets'
+                                ? day.sets
+                                : day.volume
+                          const level =
+                            metricValue <= 0
+                              ? 0
+                              : Math.min(4, Math.ceil((metricValue / statsOverview.heatmapPeak) * 4))
+                          const dayOfMonth = day.date.split('-')[2] ?? '--'
+                          const metricLabel =
+                            statsHeatmapMetric === 'sessions'
+                              ? `${day.sessions} seance(s)`
+                              : statsHeatmapMetric === 'sets'
+                                ? `${day.sets} set(s)`
+                                : formatVolumeValue(day.volume)
+
+                          return (
+                            <button
+                              type="button"
+                              key={day.date}
+                              className={`stats-heatmap__day is-level-${level}`}
+                              disabled={!day.inRange}
+                              onClick={() => {
+                                if (!day.inRange) {
+                                  return
+                                }
+
+                                setStatsRange('custom')
+                                setStatsDateStart(day.date)
+                                setStatsDateEnd(day.date)
+                              }}
+                              title={`${formatHistoryDateValue(day.date)} · ${metricLabel}`}
+                              aria-label={`${formatHistoryDateValue(day.date)}: ${metricLabel}`}
+                            >
+                              <span>{dayOfMonth}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="stats-heatmap__legend" aria-hidden="true">
+                  <span>Moins</span>
+                  <div className="stats-heatmap__legend-scale">
+                    <span className="stats-heatmap__day is-level-0" />
+                    <span className="stats-heatmap__day is-level-1" />
+                    <span className="stats-heatmap__day is-level-2" />
+                    <span className="stats-heatmap__day is-level-3" />
+                    <span className="stats-heatmap__day is-level-4" />
+                  </div>
+                  <span>Plus</span>
+                </div>
+              </article>
             </>
           )}
         </section>

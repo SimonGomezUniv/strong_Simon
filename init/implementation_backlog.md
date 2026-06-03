@@ -542,6 +542,138 @@
   - snapshots de rapports stables
   - aucune regression sur le calcul des stats existantes
 
+## EPIC L - Stats v2 orientee pilotage (P1)
+
+### L-00 Cadrage KPI et instrumentation
+- Priorite: P1
+- Estimation: S
+- Dependances: F-03
+- Description: definir les KPI produit de la page stats et instrumenter les evenements pour mesurer l'usage et l'impact.
+- KPI cibles:
+  - taux de consultation hebdomadaire de la page stats
+  - temps moyen passe sur la page stats
+  - taux d'utilisation des filtres machine/periode
+  - variation du streak hebdomadaire sur 4 semaines
+- Critere d'acceptation:
+  - events telemetry emis (open_stats, filter_machine, click_heatmap_day, click_machine_card)
+  - dashboard de suivi disponible (meme minimal via logs locaux)
+  - baseline avant livraison des features L-01 a L-07
+
+### L-01 Heatmap des seances (Must)
+- Priorite: P1
+- Estimation: M
+- Dependances: F-03b
+- Description: ajouter une heatmap calendrier pour visualiser la regularite et l'intensite d'entrainement.
+- User story:
+  - En tant qu'utilisateur, je veux voir mes jours actifs/inactifs pour suivre ma constance.
+- Critere d'acceptation:
+  - grille semaine x jour avec code couleur lisible
+  - metrique selectionnable (seances, sets, volume)
+  - survol affiche details du jour (date, nb seances, nb sets, volume)
+  - clic sur un jour applique un filtre sur les graphes du dessous
+  - etat vide explicite si aucune donnee sur la periode
+
+### L-02 Section machines: carte avec image (Must)
+- Priorite: P1
+- Estimation: S
+- Dependances: C-01, F-03d
+- Description: enrichir la section "Machines les plus utilisees" avec image machine et indicateurs compacts.
+- User story:
+  - En tant qu'utilisateur, je veux reconnaitre instantanement la machine pour lire plus vite mes stats.
+- Critere d'acceptation:
+  - chaque ligne devient une carte avec vignette image
+  - infos visibles: nom, seances, sets avec poids, max, tendance 30j
+  - clic sur carte conserve le comportement de filtre actuel
+  - fallback visuel en cas d'image absente
+  - layout stable mobile/desktop
+
+### L-03 Score de progression hebdo (Should)
+- Priorite: P1
+- Estimation: M
+- Dependances: F-03b, K-02
+- Description: calculer un score simple 0-100 pour piloter progression globale (frequence, volume, progression charge).
+- User story:
+  - En tant qu'utilisateur, je veux un signal unique pour savoir si ma semaine va dans le bon sens.
+- Critere d'acceptation:
+  - formule documentee et transparente
+  - score compare a la semaine precedente
+  - explication des composantes du score accessible dans l'UI
+
+### L-04 Timeline PR et records (Should)
+- Priorite: P1
+- Estimation: S
+- Dependances: K-02
+- Description: afficher les nouveaux records personnels detectes sur la periode selectionnee.
+- User story:
+  - En tant qu'utilisateur, je veux identifier mes records recents pour renforcer ma motivation.
+- Critere d'acceptation:
+  - liste des PR (machine, valeur, date)
+  - filtres periode et machine compatibles
+  - lien depuis PR vers seance source
+
+### L-05 Detection stagnation et alertes actionnables (Should)
+- Priorite: P1
+- Estimation: M
+- Dependances: K-02, K-03
+- Description: detecter automatiquement les exercices sans progression et proposer des actions concretes.
+- User story:
+  - En tant qu'utilisateur, je veux etre alerte quand je stagne pour ajuster mon plan.
+- Critere d'acceptation:
+  - regle parametree (ex: 4 seances sans progression)
+  - statut par machine: en progression / stable / en stagnation
+  - suggestion courte associee (rep range, deload, variation exercice)
+
+### L-06 Equilibre musculaire push/pull/legs (Could)
+- Priorite: P2
+- Estimation: M
+- Dependances: C-01, F-03b
+- Description: presenter la repartition du volume par grands groupes musculaires pour detecter les desequilibres.
+- User story:
+  - En tant qu'utilisateur, je veux verifier l'equilibre de mon programme pour eviter les angles morts.
+- Critere d'acceptation:
+  - repartition volume affichee par groupe
+  - seuil d'alerte configurable pour desequilibre
+  - recommandations simples pour reequilibrer
+
+### L-07 Adherence au plan (Could)
+- Priorite: P2
+- Estimation: S
+- Dependances: D-03, E-04
+- Description: comparer seances prevues (templates) et seances realisees pour mesurer la discipline d'execution.
+- User story:
+  - En tant qu'utilisateur, je veux savoir si je respecte mon plan initial.
+- Critere d'acceptation:
+  - taux de completion template sur periode
+  - ecarts les plus frequents (exercice saute, sets manquants)
+  - vue resume hebdo actionnable
+
+### L-08 Performance, accessibilite et robustesse stats (Must)
+- Priorite: P1
+- Estimation: S
+- Dependances: L-01, L-02
+- Description: garantir une experience fluide mobile/desktop malgre l'augmentation des visualisations.
+- Critere d'acceptation:
+  - lazy loading des images machine
+  - aucun depassement horizontal mobile dans la page stats
+  - navigation clavier et labels accessibles sur heatmap/cartes
+  - temps de rendu stats < 200 ms sur dataset de reference (>= 1 an)
+
+### L-09 Plan de livraison sprintable (Must)
+- Priorite: P1
+- Estimation: XS
+- Dependances: L-00
+- Description: transformer l'epic L en lot de livraison court, testable et mesurable.
+- Lot Sprint 1:
+  - L-00, L-01 (V1), L-02
+- Lot Sprint 2:
+  - L-03, L-04, L-08
+- Lot Sprint 3:
+  - L-05, L-06, L-07
+- Critere d'acceptation:
+  - demo de fin de sprint avec donnees reelles
+  - verif KPI pre/post sur 2 semaines
+  - decision Go/No-Go du lot suivant
+
 ## Parcours de recette MVP
 - creer un template depuis catalogue
 - lancer une seance
@@ -557,7 +689,10 @@
 4. E-01, D-03, E-02, E-03, E-04
 5. H-01, H-02, H-03, H-04, H-05, H-06
 6. J-01, J-02, J-03
-7. F-01, F-02
-8. K-01, K-02, K-03, K-04, K-05, K-08
-9. K-06, K-07
-10. G-01, G-02, G-03
+7. F-01, F-02, F-03
+8. L-00, L-01, L-02
+9. L-03, L-04, L-08
+10. L-05, L-06, L-07
+11. K-01, K-02, K-03, K-04, K-05, K-08
+12. K-06, K-07
+13. G-01, G-02, G-03
