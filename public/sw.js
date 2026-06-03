@@ -1,5 +1,17 @@
 const CACHE_NAME = 'strong-simon-cache-v2'
-const APP_SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/logo_simon_strong.png']
+const SCOPE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, '')
+
+function withBasePath(resource) {
+  const normalized = resource.startsWith('/') ? resource : `/${resource}`
+  return `${SCOPE_PATH}${normalized}`
+}
+
+const APP_SHELL = [
+  withBasePath('/'),
+  withBasePath('/manifest.webmanifest'),
+  withBasePath('/favicon.svg'),
+  withBasePath('/logo_simon_strong.png'),
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -30,10 +42,14 @@ self.addEventListener('fetch', (event) => {
       fetch(event.request)
         .then((response) => {
           const copy = response.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy))
+          caches.open(CACHE_NAME).then((cache) => cache.put(withBasePath('/index.html'), copy))
           return response
         })
-        .catch(() => caches.match('/index.html').then((cached) => cached || caches.match('/'))),
+        .catch(() =>
+          caches
+            .match(withBasePath('/index.html'))
+            .then((cached) => cached || caches.match(withBasePath('/'))),
+        ),
     )
     return
   }

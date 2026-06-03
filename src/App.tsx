@@ -134,6 +134,15 @@ function createId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function resolvePublicAssetUrl(path: string) {
+  if (/^(https?:)?\/\//.test(path) || path.startsWith('data:')) {
+    return path
+  }
+
+  const normalizedPath = path.startsWith('/') ? path.slice(1) : path
+  return `${import.meta.env.BASE_URL}${normalizedPath}`
+}
+
 function createTemplateExercise(exerciseId: string, orderIndex: number): TemplateExercise {
   return {
     id: createId(),
@@ -2860,7 +2869,11 @@ function App() {
   return (
     <main className="app-shell">
       <header className="header">
-        <img className="header-logo" src="/logo_simon_strong.png" alt="Strong Simon" />
+        <img
+          className="header-logo"
+          src={resolvePublicAssetUrl('logo_simon_strong.png')}
+          alt="Strong Simon"
+        />
         <div className="status-bar">
           <button
             type="button"
@@ -3565,7 +3578,7 @@ function App() {
                     {currentExerciseInfo?.imageUrl && !isExerciseImageBroken ? (
                       <img
                         className="exercise-media__image"
-                        src={currentExerciseInfo.imageUrl}
+                        src={resolvePublicAssetUrl(currentExerciseInfo.imageUrl)}
                         alt={currentExerciseInfo.name}
                         loading="lazy"
                         onError={() => setIsExerciseImageBroken(true)}
@@ -4109,7 +4122,11 @@ function App() {
 
                         return (
                           <article className="exercise-card" key={exercise.id}>
-                            <img src={exercise.imageUrl} alt={exercise.name} loading="lazy" />
+                            <img
+                              src={resolvePublicAssetUrl(exercise.imageUrl)}
+                              alt={exercise.name}
+                              loading="lazy"
+                            />
                             <div>
                               <strong>{exercise.name}</strong>
                               <p>{exercise.aliases.join(' | ')}</p>

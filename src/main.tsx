@@ -27,7 +27,7 @@ if ('serviceWorker' in navigator) {
       return
     }
 
-    navigator.serviceWorker.register('/sw.js').catch(() => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {
       // Keep app functional even if SW registration fails.
     })
   })
