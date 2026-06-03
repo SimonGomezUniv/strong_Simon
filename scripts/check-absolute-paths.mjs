@@ -61,6 +61,7 @@ const scanConfig = [
       {
         name: 'service worker hardcoded absolute cache/fallback paths',
         regex: /['"]\/(?:index\.html|manifest\.webmanifest|favicon\.svg|logo_simon_strong\.png|sw\.js)['"]/g,
+        allow: (line) => line.includes('withBasePath('),
       },
     ],
   },
