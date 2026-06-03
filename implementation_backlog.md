@@ -450,6 +450,98 @@
   - en mode fusionner, seuls les templates manquants sont ajoutes sans dupliquer les ids existants
   - un message de resultat indique le nombre de templates ajoutes/remplaces
 
+## EPIC K - Analyse IA locale des seances (P1)
+
+### K-01 Definir le contrat de donnees d'analyse
+- Priorite: P1
+- Estimation: S
+- Dependances: E-04, F-02
+- Description: definir un format stable d'entree/sortie pour l'analyse (historique seances, metriques derivees, recommandations).
+- Critere d'acceptation:
+  - un type TypeScript `WorkoutAnalysisReport` est defini
+  - la generation de rapport fonctionne sans CSV manuel
+  - la structure est versionnee pour evolutions futures
+
+### K-02 Moteur d'analyse locale (regles + heuristiques)
+- Priorite: P1
+- Estimation: M
+- Dependances: K-01
+- Description: calculer automatiquement volume, frequence, progression charge/reps, PR, stagnation et regularite a partir des seances locales.
+- Critere d'acceptation:
+  - calcul execute 100% en local (sans appel API externe)
+  - metriques coherentes avec les donnees de l'historique
+  - gestion robuste des cas incomplets (seances partielles, poids manquants)
+
+### K-03 Generation de feedback coach en langage naturel
+- Priorite: P1
+- Estimation: M
+- Dependances: K-02
+- Description: transformer les metriques en feedback actionnable (points forts, alertes, axes de progression, plan semaine suivante) via templates de texte.
+- Critere d'acceptation:
+  - un resume lisible est affiche sans saisie de prompt
+  - chaque recommandation cite au moins une metrique source
+  - ton et niveau de detail configurables (court/normal/detaille)
+
+### K-04 Ecran Analyse dans l'application
+- Priorite: P1
+- Estimation: M
+- Dependances: K-02, K-03
+- Description: ajouter un onglet/panneau Analyse avec selection de periode (7j, 1m, 3m, custom), focus par exercice et historique des rapports.
+- Critere d'acceptation:
+  - acces depuis la navigation principale ou Settings
+  - filtre periode et exercice operationnels
+  - etat vide clair si pas assez de donnees
+
+### K-05 Carte "Analyse rapide" dans le detail d'une seance
+- Priorite: P1
+- Estimation: S
+- Dependances: K-04
+- Description: afficher un mini feedback local directement sur une seance terminee (PR detecte, charge vs derniere seance, suggestion repos).
+- Critere d'acceptation:
+  - carte visible sur detail de seance terminee
+  - comparaison faite avec la derniere reference pertinente
+  - pas de ralentissement perceptible de l'UI
+
+### K-06 Export prompt pack pour LLM externe (optionnel)
+- Priorite: P2
+- Estimation: S
+- Dependances: K-02
+- Description: permettre un export "Prompt + JSON/CSV" pre-rempli pour l'utilisateur qui veut coller dans ChatGPT/Claude manuellement.
+- Critere d'acceptation:
+  - bouton "Copier prompt d'analyse" disponible
+  - payload contient contexte utile et anonymisable
+  - aucun token/API requis dans l'application
+
+### K-07 Connecteur IA locale optionnelle (sans token)
+- Priorite: P2
+- Estimation: L
+- Dependances: K-03
+- Description: ajouter un provider optionnel pour modele local (ex: WebLLM dans navigateur ou endpoint local type Ollama), desactive par defaut.
+- Critere d'acceptation:
+  - fonctionnement possible sans compte ni API payante
+  - fallback automatique vers mode regles si modele indisponible
+  - avertissement UX sur cout batterie/performance mobile
+
+### K-08 Confidentialite et controle utilisateur
+- Priorite: P1
+- Estimation: S
+- Dependances: K-04
+- Description: exposer clairement le mode "analyse locale uniquement", avec options d'effacement des rapports et de desactivation.
+- Critere d'acceptation:
+  - parametre explicite "Aucune donnee envoyee"
+  - suppression des rapports d'analyse possible en 1 action
+  - texte de transparence accessible depuis Settings
+
+### K-09 Tests et non-regression du moteur d'analyse
+- Priorite: P1
+- Estimation: M
+- Dependances: K-02, K-03
+- Description: ajouter jeux de donnees de reference + tests unitaires pour stabiliser les regles d'analyse et la generation de recommandations.
+- Critere d'acceptation:
+  - cas PR, stagnation, reprise, surcharge couverts par tests
+  - snapshots de rapports stables
+  - aucune regression sur le calcul des stats existantes
+
 ## Parcours de recette MVP
 - creer un template depuis catalogue
 - lancer une seance
@@ -466,4 +558,6 @@
 5. H-01, H-02, H-03, H-04, H-05, H-06
 6. J-01, J-02, J-03
 7. F-01, F-02
-8. G-01, G-02, G-03
+8. K-01, K-02, K-03, K-04, K-05, K-08
+9. K-06, K-07
+10. G-01, G-02, G-03
