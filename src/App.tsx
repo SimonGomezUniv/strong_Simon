@@ -73,6 +73,7 @@ type StatsWeeklyScore = {
 
 type StatsPersonalRecordPoint = {
   key: string
+  sourceSessionId: string
   date: string
   machineId: string
   machineLabel: string
@@ -82,6 +83,7 @@ type StatsPersonalRecordPoint = {
 type StatsStagnationPoint = {
   machineId: string
   machineLabel: string
+  sourceSessionId: string
   trend: 'progressing' | 'stagnating'
   recentMax: number
   previousMax: number
@@ -1768,6 +1770,7 @@ function App() {
           machineBestWeight.set(set.machineId, set.weight)
           personalRecordsRaw.push({
             key: `${session.id}-${set.machineId}-${index}`,
+            sourceSessionId: session.id,
             date: session.startedAt,
             machineId: set.machineId,
             machineLabel: set.machineLabel,
@@ -1779,7 +1782,10 @@ function App() {
 
     const personalRecords = personalRecordsRaw.slice(-8).reverse()
 
-    const machineTimeline = new Map<string, Array<{ date: string; maxWeight: number; machineLabel: string }>>()
+    const machineTimeline = new Map<
+      string,
+      Array<{ date: string; maxWeight: number; machineLabel: string; sessionId: string }>
+    >()
     sessionSnapshots.forEach(({ session, weightedSets }) => {
       const sessionMaxByMachine = new Map<string, { maxWeight: number; machineLabel: string }>()
 
@@ -1799,6 +1805,7 @@ function App() {
           date: session.startedAt,
           maxWeight: point.maxWeight,
           machineLabel: point.machineLabel,
+          sessionId: session.id,
         })
         machineTimeline.set(machineId, timeline)
       })
@@ -1824,6 +1831,7 @@ function App() {
         return {
           machineId,
           machineLabel: timeline[timeline.length - 1]?.machineLabel ?? 'Machine inconnue',
+          sourceSessionId: timeline[timeline.length - 1]?.sessionId ?? '',
           trend,
           recentMax,
           previousMax,
@@ -3231,6 +3239,112 @@ function App() {
     showNotice('Export CSV genere.')
   }
 
+  function openStatsSourceSession(sessionId: string) {
+    if (!sessionId) {
+      return
+    }
+
+    const exists = sessionHistory.some((session) => session.id === sessionId)
+    if (!exists) {
+      showNotice('Seance source introuvable dans l historique local.')
+      return
+    }
+
+    selectSession(sessionId)
+  }
+
+  function exportStatsInsightsCsv() {
+    const rows = [
+      [
+        'section',
+        'metric',
+        'machine',
+        'value',
+        'delta',
+        'date',
+        'trend',
+        'recommendation',
+        'source_session_id',
+      ],
+      [
+        'weekly_score',
+        'current',
+        'all',
+        String(statsOverview.weeklyScore.current),
+        String(statsOverview.weeklyScore.delta),
+        '',
+        '',
+        '',
+        '',
+      ],
+      [
+        'weekly_score',
+        'frequency',
+        'all',
+        String(statsOverview.weeklyScore.frequencyScore),
+        '',
+        '',
+        '',
+        '',
+        '',
+      ],
+      [
+        'weekly_score',
+        'volume',
+        'all',
+        String(statsOverview.weeklyScore.volumeScore),
+        '',
+        '',
+        '',
+        '',
+        '',
+      ],
+      [
+        'weekly_score',
+        'progression',
+        'all',
+        String(statsOverview.weeklyScore.progressionScore),
+        '',
+        '',
+        '',
+        '',
+        '',
+      ],
+      ...statsOverview.personalRecords.map((record) => [
+        'personal_record',
+        'max_weight',
+        record.machineLabel,
+        String(record.weight),
+        '',
+        record.date,
+        '',
+        '',
+        record.sourceSessionId,
+      ]),
+      ...statsOverview.stagnationPoints.map((point) => [
+        'stagnation',
+        'recent_max',
+        point.machineLabel,
+        String(point.recentMax),
+        String(point.recentMax - point.previousMax),
+        '',
+        point.trend,
+        point.recommendation,
+        point.sourceSessionId,
+      ]),
+    ]
+
+    const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'strong-simon-stats-insights.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+    showNotice('Export insights stats genere.')
+  }
+
   return (
     <main className="app-shell">
       <header className="header">
@@ -3766,6 +3880,11 @@ function App() {
                 />
               </label>
             </div>
+
+            <button type="button" className="button-compact" onClick={exportStatsInsightsCsv}>
+              Export insights CSV
+            </button>
+
             <p className="stats-filter-hint">
               Periode affichee: {statsOverview.rangeLabel}. Filtre applique a tous les graphes.
             </p>
@@ -3846,11 +3965,18 @@ function App() {
                   ) : (
                     <div className="stats-pr-list">
                       {statsOverview.personalRecords.map((record) => (
-                        <div className="stats-pr-item" key={record.key}>
+                        <button
+                          type="button"
+                          className="stats-pr-item"
+                          key={record.key}
+                          onClick={() => openStatsSourceSession(record.sourceSessionId)}
+                          title="Ouvrir la seance source"
+                        >
                           <strong>{record.machineLabel}</strong>
                           <span>{formatWeightValue(record.weight)}</span>
                           <small>{formatStatDateLabel(record.date)}</small>
-                        </div>
+                          <span className="stats-drilldown-hint">Voir la seance -&gt;</span>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -3869,7 +3995,13 @@ function App() {
                   ) : (
                     <div className="stats-stagnation-list">
                       {statsOverview.stagnationPoints.map((point) => (
-                        <div className="stats-stagnation-item" key={point.machineId}>
+                        <button
+                          type="button"
+                          className="stats-stagnation-item"
+                          key={point.machineId}
+                          onClick={() => openStatsSourceSession(point.sourceSessionId)}
+                          title="Ouvrir la seance source"
+                        >
                           <div className="stats-stagnation-item__head">
                             <strong>{point.machineLabel}</strong>
                             <span className={point.trend === 'stagnating' ? 'is-stagnating' : 'is-progressing'}>
@@ -3880,7 +4012,8 @@ function App() {
                             Recent: {formatWeightValue(point.recentMax)} | Avant: {formatWeightValue(point.previousMax)}
                           </p>
                           <small>{point.recommendation}</small>
-                        </div>
+                          <span className="stats-drilldown-hint">Voir la seance -&gt;</span>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -4082,6 +4215,9 @@ function App() {
                     <span className="stats-heatmap__day is-level-4" />
                   </div>
                   <span>Plus</span>
+                  <strong>
+                    Max: {statsHeatmapMetric === 'sessions' ? `${statsOverview.heatmapPeak} seance(s)` : statsHeatmapMetric === 'sets' ? `${statsOverview.heatmapPeak} set(s)` : formatVolumeValue(statsOverview.heatmapPeak)}
+                  </strong>
                 </div>
               </article>
             </>

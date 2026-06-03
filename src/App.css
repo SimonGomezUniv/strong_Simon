@@ -1154,6 +1154,18 @@ button:disabled {
   padding: 0.45rem 0.55rem;
   display: grid;
   gap: 0.16rem;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.stats-pr-item:hover,
+.stats-stagnation-item:hover {
+  border-color: #c8d8e6;
+  background: #f1f8fd;
 }
 
 .stats-pr-item strong,
@@ -1174,6 +1186,14 @@ button:disabled {
   margin: 0;
   color: #4a6176;
   font-size: 0.76rem;
+}
+
+.stats-drilldown-hint {
+  margin-top: 0.1rem;
+  color: #0b4f8a;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .stats-stagnation-item__head {
@@ -1292,6 +1312,12 @@ button:disabled {
   gap: 0.4rem;
   font-size: 0.75rem;
   color: #4a6176;
+}
+
+.stats-heatmap__legend strong {
+  color: #0b2d4d;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .stats-heatmap__legend-scale {
