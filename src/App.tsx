@@ -637,7 +637,7 @@ function parseStrongWorkoutsCsv(csvText: string): WorkoutSession[] {
 
     const normalizedExerciseName = normalizeText(rawExercise)
     const resolvedExerciseId =
-      exerciseLookup.get(normalizedExerciseName) ?? rawExercise.trim().toLowerCase().replace(/\s+/g, '-')
+      exerciseLookup.get(normalizedExerciseName) ?? normalizedExerciseName.replace(/\s+/g, '-')
 
     if (!sessionGroup.exercises.has(resolvedExerciseId)) {
       sessionGroup.exercises.set(resolvedExerciseId, {
@@ -1425,14 +1425,19 @@ function App() {
       })
       .sort((left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime())
 
+    const exerciseLookup = createExerciseLookup()
+    const exerciseById = new Map(EXERCISES.map((exercise) => [exercise.id, exercise]))
+    const resolveExerciseId = (exerciseId: string) =>
+      exerciseLookup.get(normalizeText(exerciseId)) ?? exerciseId
+
     const usageMap = new Map<string, StatsUsagePoint>()
 
     completedSessions.forEach((session) => {
       const machinesSeenInSession = new Set<string>()
 
       session.exercises.forEach((exercise) => {
-        const exerciseInfo = EXERCISES.find((entry) => entry.id === exercise.exerciseId)
-        const machineId = exercise.exerciseId
+        const machineId = resolveExerciseId(exercise.exerciseId)
+        const exerciseInfo = exerciseById.get(machineId)
         const machineLabel = exerciseInfo?.name ?? 'Machine inconnue'
         let maxWeightForExerciseInSession = 0
         let countedSets = 0
@@ -1499,7 +1504,9 @@ function App() {
         let sessionMaxWeight = 0
 
         session.exercises.forEach((exercise) => {
-          if (activeMachineId !== 'all' && exercise.exerciseId !== activeMachineId) {
+          const machineId = resolveExerciseId(exercise.exerciseId)
+
+          if (activeMachineId !== 'all' && machineId !== activeMachineId) {
             return
           }
 
@@ -1528,12 +1535,13 @@ function App() {
 
       const points: StatsWeightPoint[] = []
       session.exercises.forEach((exercise) => {
-        if (activeMachineId !== 'all' && exercise.exerciseId !== activeMachineId) {
+        const machineId = resolveExerciseId(exercise.exerciseId)
+
+        if (activeMachineId !== 'all' && machineId !== activeMachineId) {
           return
         }
 
-        const machineLabel =
-          EXERCISES.find((entry) => entry.id === exercise.exerciseId)?.name ?? 'Machine inconnue'
+        const machineLabel = exerciseById.get(machineId)?.name ?? 'Machine inconnue'
 
         exercise.sets.forEach((set) => {
           if (set.actualWeight <= 0) {
@@ -1543,7 +1551,7 @@ function App() {
           points.push({
             key: `${session.id}-${exercise.id}-${set.id}`,
             label: formatStatDateLabel(session.startedAt),
-            machineId: exercise.exerciseId,
+            machineId,
             machineLabel,
             weight: set.actualWeight,
             date: set.completedAt ?? session.startedAt,
