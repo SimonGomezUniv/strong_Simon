@@ -3428,105 +3428,107 @@ function App() {
                 </article>
               </div>
 
-              <article className="stats-chart-card">
-                <div className="card-head section-head section-head--tight">
-                  <div>
-                    <h3>Machines les plus utilisees</h3>
-                    <p className="panel-intro">Clique sur une machine pour filtrer les graphes.</p>
-                  </div>
-                  <span className="history-total-chip">{statsOverview.usage.length} machines</span>
-                </div>
-
-                <div className="stats-usage-list" aria-label="Classement des machines utilisees">
-                  {statsOverview.usage.map((entry) => {
-                    const maxSessions = Math.max(1, ...statsOverview.usage.map((item) => item.sessions))
-                    const width = Math.max(10, Math.round((entry.sessions / maxSessions) * 100))
-                    const isActive = statsOverview.activeMachineId === entry.machineId
-
-                    return (
-                      <button
-                        type="button"
-                        className={isActive ? 'stats-usage-row is-active' : 'stats-usage-row'}
-                        key={entry.machineId}
-                        onClick={() => {
-                          setStatsMachineFilter((previous) =>
-                            previous === entry.machineId ? 'all' : entry.machineId,
-                          )
-                        }}
-                        aria-pressed={isActive}
-                        title={isActive ? 'Retirer le filtre machine' : `Filtrer sur ${entry.label}`}
-                      >
-                        <div className="stats-usage-row__head">
-                          <strong>{entry.label}</strong>
-                          <span>{entry.sessions} seances</span>
-                        </div>
-                        <div className="stats-usage-row__track">
-                          <div className="stats-usage-row__fill" style={{ width: `${width}%` }} />
-                        </div>
-                        <div className="stats-usage-row__meta">
-                          <span>{entry.sets} sets avec poids</span>
-                          <span>{formatWeightValue(entry.maxWeight)} max</span>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </article>
-
-              <article className="stats-chart-card">
-                <div className="card-head section-head section-head--tight">
-                  <div>
-                    <h3>
-                      {statsWeightMode === 'max-per-session'
-                        ? 'Evolution du poids max par seance'
-                        : 'Evolution de tous les poids'}
-                    </h3>
-                    <p className="panel-intro">
-                      {statsWeightMode === 'max-per-session'
-                        ? `Poids maximum releve par seance pour ${statsOverview.selectedMachineLabel.toLowerCase()}.`
-                        : `Toutes les charges enregistrees pour ${statsOverview.selectedMachineLabel.toLowerCase()}.`}
-                    </p>
-                  </div>
-                  <span className="history-total-chip">{statsOverview.weightPoints.length} points</span>
-                </div>
-
-                {statsOverview.weightPoints.length === 0 ? (
-                  <p className="stats-chart-empty">Aucune charge enregistree pour cette selection.</p>
-                ) : (
-                  <div className="stats-line-chart" aria-label="Graphique des poids">
-                    <svg viewBox="0 0 100 48" preserveAspectRatio="none" role="img">
-                      <path
-                        className="stats-line-chart__path"
-                        d={buildLinePath(statsOverview.weightPoints, 100, 40)}
-                      />
-                      {statsOverview.weightPoints.map((point, index) => {
-                        const position = getLinePointPosition(statsOverview.weightPoints, index, 100, 40)
-
-                        return (
-                          <circle
-                            key={point.key}
-                            cx={position.x}
-                            cy={position.y}
-                            r="0.42"
-                            className="stats-line-chart__dot"
-                          >
-                            <title>{`${point.machineLabel} · ${point.label} · ${formatWeightValue(point.weight)}`}</title>
-                          </circle>
-                        )
-                      })}
-                    </svg>
-
-                    <div className="stats-line-chart__legend">
-                      {statsOverview.weightPoints.map((point) => (
-                        <div className="stats-line-chart__legend-item" key={`legend-${point.key}`}>
-                          <span>{point.label}</span>
-                          <strong>{formatWeightValue(point.weight)}</strong>
-                        </div>
-                      ))}
+              <div className="stats-main-layout">
+                <article className="stats-chart-card stats-chart-card--usage">
+                  <div className="card-head section-head section-head--tight">
+                    <div>
+                      <h3>Machines les plus utilisees</h3>
+                      <p className="panel-intro">Clique sur une machine pour filtrer les graphes.</p>
                     </div>
+                    <span className="history-total-chip">{statsOverview.usage.length} machines</span>
                   </div>
-                )}
-              </article>
+
+                  <div className="stats-usage-list" aria-label="Classement des machines utilisees">
+                    {statsOverview.usage.map((entry) => {
+                      const maxSessions = Math.max(1, ...statsOverview.usage.map((item) => item.sessions))
+                      const width = Math.max(10, Math.round((entry.sessions / maxSessions) * 100))
+                      const isActive = statsOverview.activeMachineId === entry.machineId
+
+                      return (
+                        <button
+                          type="button"
+                          className={isActive ? 'stats-usage-row is-active' : 'stats-usage-row'}
+                          key={entry.machineId}
+                          onClick={() => {
+                            setStatsMachineFilter((previous) =>
+                              previous === entry.machineId ? 'all' : entry.machineId,
+                            )
+                          }}
+                          aria-pressed={isActive}
+                          title={isActive ? 'Retirer le filtre machine' : `Filtrer sur ${entry.label}`}
+                        >
+                          <div className="stats-usage-row__head">
+                            <strong>{entry.label}</strong>
+                            <span>{entry.sessions} seances</span>
+                          </div>
+                          <div className="stats-usage-row__track">
+                            <div className="stats-usage-row__fill" style={{ width: `${width}%` }} />
+                          </div>
+                          <div className="stats-usage-row__meta">
+                            <span>{entry.sets} sets avec poids</span>
+                            <span>{formatWeightValue(entry.maxWeight)} max</span>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </article>
+
+                <article className="stats-chart-card stats-chart-card--line">
+                  <div className="card-head section-head section-head--tight">
+                    <div>
+                      <h3>
+                        {statsWeightMode === 'max-per-session'
+                          ? 'Evolution du poids max par seance'
+                          : 'Evolution de tous les poids'}
+                      </h3>
+                      <p className="panel-intro">
+                        {statsWeightMode === 'max-per-session'
+                          ? `Poids maximum releve par seance pour ${statsOverview.selectedMachineLabel.toLowerCase()}.`
+                          : `Toutes les charges enregistrees pour ${statsOverview.selectedMachineLabel.toLowerCase()}.`}
+                      </p>
+                    </div>
+                    <span className="history-total-chip">{statsOverview.weightPoints.length} points</span>
+                  </div>
+
+                  {statsOverview.weightPoints.length === 0 ? (
+                    <p className="stats-chart-empty">Aucune charge enregistree pour cette selection.</p>
+                  ) : (
+                    <div className="stats-line-chart" aria-label="Graphique des poids">
+                      <svg viewBox="0 0 100 48" preserveAspectRatio="none" role="img">
+                        <path
+                          className="stats-line-chart__path"
+                          d={buildLinePath(statsOverview.weightPoints, 100, 40)}
+                        />
+                        {statsOverview.weightPoints.map((point, index) => {
+                          const position = getLinePointPosition(statsOverview.weightPoints, index, 100, 40)
+
+                          return (
+                            <circle
+                              key={point.key}
+                              cx={position.x}
+                              cy={position.y}
+                              r="0.42"
+                              className="stats-line-chart__dot"
+                            >
+                              <title>{`${point.machineLabel} · ${point.label} · ${formatWeightValue(point.weight)}`}</title>
+                            </circle>
+                          )
+                        })}
+                      </svg>
+
+                      <div className="stats-line-chart__legend">
+                        {statsOverview.weightPoints.map((point) => (
+                          <div className="stats-line-chart__legend-item" key={`legend-${point.key}`}>
+                            <span>{point.label}</span>
+                            <strong>{formatWeightValue(point.weight)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </article>
+              </div>
             </>
           )}
         </section>

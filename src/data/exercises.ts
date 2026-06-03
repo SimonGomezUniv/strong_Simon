@@ -50,6 +50,13 @@ export const EXERCISES: Exercise[] = [
     category: 'Dos',
   },
   {
+    id: 'back-extension-machine',
+    name: 'Back Extension (Machine)',
+    aliases: ['Back extension', 'Extension lombaires machine', 'Lombaires machine'],
+    imageUrl: 'exercises/back_extension_machine.jpg',
+    category: 'Dos',
+  },
+  {
     id: 'seated-overhead-press',
     name: 'Seated Overhead Press',
     aliases: [
@@ -120,6 +127,13 @@ export const EXERCISES: Exercise[] = [
     name: 'Rope Hammer Curl',
     aliases: ['Curl marteau corde', 'Hammer curl cable', 'Brachial corde'],
     imageUrl: 'exercises/rope_hammer_curl.jpg',
+    category: 'Bras',
+  },
+  {
+    id: 'hammer-curl-dumbbell',
+    name: 'Hammer Curl (Dumbbell)',
+    aliases: ['Dumbbell hammer curl', 'Curl marteau halteres', 'Curl marteau haltere'],
+    imageUrl: 'exercises/hammer_curl_dumbbell.jpg',
     category: 'Bras',
   },
   {
