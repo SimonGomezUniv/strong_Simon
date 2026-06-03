@@ -40,6 +40,20 @@ VITE_GOOGLE_CLIENT_ID=your-google-web-client-id.apps.googleusercontent.com
  
  - Utiliser la checklist visuelle avant release: `REGRESSION_CHECKLIST.md`
 
+## Deploiement automatique GitHub Pages
+
+Le projet inclut un workflow GitHub Actions: `.github/workflows/deploy-pages.yml`.
+
+Pour l'activer:
+1. Pousser la branche `main` sur GitHub.
+2. Aller dans `Settings > Pages` du repo.
+3. Dans `Build and deployment`, choisir `Source: GitHub Actions`.
+
+Ensuite, chaque push sur `main` declenche automatiquement:
+- installation des dependances
+- build Vite
+- publication du dossier `dist` sur GitHub Pages
+
 ### Strategie de conflit (v1)
 
 - l'app compare `updatedAt` distant avec un horodatage local derive des templates/sessions
