@@ -353,6 +353,30 @@ function getLinePointPosition(points: StatsWeightPoint[], index: number, width: 
   return { x, y }
 }
 
+async function showWorkoutNotification(title: string, body: string) {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+    return
+  }
+
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.ready
+      await registration.showNotification(title, {
+        body,
+        tag: 'strong-simon-rest',
+        renotify: true,
+        icon: resolvePublicAssetUrl('/logo_simon_strong.png'),
+        badge: resolvePublicAssetUrl('/logo_simon_strong.png'),
+      })
+      return
+    } catch {
+      // Fallback to document-level notifications when service worker notification fails.
+    }
+  }
+
+  new Notification(title, { body })
+}
+
 function triggerWorkoutAlert(title: string, body: string) {
   if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
     try {
@@ -365,9 +389,7 @@ function triggerWorkoutAlert(title: string, body: string) {
     }
   }
 
-  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    new Notification(title, { body })
-  }
+  void showWorkoutNotification(title, body)
 }
 
 function startOfDay(date: Date) {
@@ -1280,6 +1302,7 @@ function App() {
   const [isExerciseImageBroken, setIsExerciseImageBroken] = useState(false)
   const [isResting, setIsResting] = useState(false)
   const [restRemaining, setRestRemaining] = useState(0)
+  const [restEndsAtMs, setRestEndsAtMs] = useState<number | null>(null)
   const [notice, setNotice] = useState('')
   const [isRestDonePopupOpen, setIsRestDonePopupOpen] = useState(false)
   const [isWatchStartPopupOpen, setIsWatchStartPopupOpen] = useState(false)
@@ -2086,27 +2109,50 @@ function App() {
   }, [statsMachineFilter, statsOverview.machineOptions])
 
   useEffect(() => {
-    if (!isResting || restRemaining <= 0) {
+    if (!isResting || !restEndsAtMs) {
       return undefined
     }
 
-    const timer = window.setInterval(() => {
-      setRestRemaining((current) => {
-        if (current <= 1) {
-          window.clearInterval(timer)
-          setIsResting(false)
-          setNotice('Repos terminé.')
-          setIsRestDonePopupOpen(true)
-          triggerWorkoutAlert('Strong Simon', 'Le temps de repos est terminé.')
-          return 0
-        }
+    let didComplete = false
 
-        return current - 1
-      })
-    }, 1000)
+    const syncRemainingTime = () => {
+      if (didComplete) {
+        return
+      }
 
-    return () => window.clearInterval(timer)
-  }, [isResting, restRemaining])
+      const remainingSeconds = Math.max(0, Math.ceil((restEndsAtMs - Date.now()) / 1000))
+
+      setRestRemaining(remainingSeconds)
+
+      if (remainingSeconds <= 0) {
+        didComplete = true
+        setIsResting(false)
+        setRestEndsAtMs(null)
+        setNotice('Repos terminé.')
+        setIsRestDonePopupOpen(true)
+        triggerWorkoutAlert('Strong Simon', 'Le temps de repos est terminé.')
+      }
+    }
+
+    syncRemainingTime()
+
+    const timer = window.setInterval(syncRemainingTime, 250)
+    const handleWindowFocus = () => syncRemainingTime()
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        syncRemainingTime()
+      }
+    }
+
+    window.addEventListener('focus', handleWindowFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', handleWindowFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [isResting, restEndsAtMs])
 
   useEffect(() => {
     if (!selectedSessionId && historyOverview.sessions.length > 0) {
@@ -2404,6 +2450,7 @@ function App() {
     setActiveView('session')
     setIsResting(false)
     setRestRemaining(0)
+    setRestEndsAtMs(null)
     setIsRestDonePopupOpen(false)
     setIsFinishRecapOpen(false)
     setIsWatchStartPopupOpen(true)
@@ -2584,6 +2631,7 @@ function App() {
     if (isResting) {
       setIsResting(false)
       setRestRemaining(0)
+      setRestEndsAtMs(null)
     }
 
     setActiveSession((previous) => {
@@ -2617,6 +2665,7 @@ function App() {
 
     if (restDuration > 0) {
       setRestRemaining(restDuration)
+      setRestEndsAtMs(Date.now() + restDuration * 1000)
       setIsResting(true)
       setIsRestDonePopupOpen(false)
     }
@@ -2678,6 +2727,7 @@ function App() {
     setCurrentExerciseIndex(0)
     setIsResting(false)
     setRestRemaining(0)
+    setRestEndsAtMs(null)
     setIsRestDonePopupOpen(false)
     showNotice('Seance terminee et enregistree.')
   }
@@ -2923,6 +2973,7 @@ function App() {
     setIsFinishRecapOpen(false)
     setIsResting(false)
     setRestRemaining(0)
+    setRestEndsAtMs(null)
     setIsRestDonePopupOpen(false)
     setIsWatchStartPopupOpen(false)
     setStatsMachineFilter('all')

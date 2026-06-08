@@ -78,3 +78,25 @@ self.addEventListener('fetch', (event) => {
     }),
   )
 })
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      const sameScopeClient = windowClients.find((client) => {
+        try {
+          return new URL(client.url).pathname.startsWith(SCOPE_PATH)
+        } catch {
+          return false
+        }
+      })
+
+      if (sameScopeClient) {
+        return sameScopeClient.focus()
+      }
+
+      return clients.openWindow(withBasePath('/'))
+    }),
+  )
+})
