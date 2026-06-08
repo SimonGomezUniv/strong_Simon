@@ -364,7 +364,6 @@ async function showWorkoutNotification(title: string, body: string) {
       await registration.showNotification(title, {
         body,
         tag: 'strong-simon-rest',
-        renotify: true,
         icon: resolvePublicAssetUrl('/logo_simon_strong.png'),
         badge: resolvePublicAssetUrl('/logo_simon_strong.png'),
       })
